@@ -1,0 +1,61 @@
+
+.auth-container {
+    max-width: 400px;
+    margin: 100px auto;
+    padding: 2rem;
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    text-align: center;
+}
+
+.auth-providers {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin: 2rem 0;
+}
+
+.auth-provider-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    border-radius: var(--radius-base);
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.auth-provider-btn.google {
+    background: #4285F4;
+    color: white;
+}
+
+.auth-provider-btn.github {
+    background: #333;
+    color: white;
+}
+
+.auth-provider-btn:hover {
+    opacity: 0.9;
+    transform: translateY(-2px);
+}
+
+.divider {
+    display: flex;
+    align-items: center;
+    margin: 1.5rem 0;
+}
+
+.divider::before,
+.divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.divider span {
+    padding: 0 1rem;
+    color: var(--color-text-secondary);
+}
