@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Report Details{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>Security Report: {{ report.repository_name }}</h1>
+        <p class="text-muted">Report ID: {{ report._id }}</p>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <p><strong>Scan Type:</strong> {{ report.scan_type }}</p>
+                    <p><strong>Severity:</strong> 
+                        <span class="badge bg-{{ 'danger' if report.severity == 'high' else 'warning' if report.severity == 'medium' else 'info' }}">
+                            {{ report.severity|upper }}
+                        </span>
+                    </p>
+                </div>
+                <div class="col-md-6">
+                    <p><strong>Findings Count:</strong> {{ report.findings_count }}</p>
+                    <p><strong>Date:</strong> {{ report.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-header">
+            <h3>Findings</h3>
+        </div>
+        <div class="card-body">
+            {% if report.findings %}
+                {% for finding in report.findings %}
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <h5 class="card-title">{{ finding.type }}</h5>
+                            <span class="badge bg-{{ 'danger' if finding.confidence >= 0.8 else 'warning' if finding.confidence >= 0.6 else 'info' }}">
+                                {{ (finding.confidence * 100)|round(1) }}% Confidence
+                            </span>
+                        </div>
+                        <p class="card-text">
+                            <strong>Location:</strong> {{ finding.location }}<br>
+                            <strong>Line:</strong> {{ finding.line }}<br>
+                            <strong>Context:</strong> 
+                            <pre><code>{{ finding.context }}</code></pre>
+                        </p>
+                        <div class="alert alert-light">
+                            <strong>Recommendation:</strong> {{ finding.recommendation }}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p>No findings in this report.</p>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="mt-4 text-center">
+        <a href="/reports" class="btn btn-outline-primary">Back to Reports</a>
+    </div>
+</div>
+{% endblock %}

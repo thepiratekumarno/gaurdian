@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Security Reports{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>Security Reports</h1>
+        <p>View all your security scan reports</p>
+    </div>
+
+    <!-- Repository filter -->
+    <div class="filter-section mb-4">
+        <!-- Update the filter form -->
+        <form method="get" action="/reports" class="mb-4">
+            <div class="input-group">
+          <input type="text" name="search" class="form-control" 
+               placeholder="Search reports..." 
+               value="{{ request.query_params.get('search', '') }}">
+            <select name="repository" class="form-select" style="max-width: 200px;">
+            <option value="">All Repositories</option>
+            {% for repo in all_repositories %}
+            <option value="{{ repo.repository_name }}" 
+                    {% if request.query_params.get('repository') == repo.repository_name %}selected{% endif %}>
+                {{ repo.repository_name }}
+            </option>
+            {% endfor %}
+        </select>
+        <select name="severity" class="form-select" style="max-width: 150px;">
+            <option value="">All Severities</option>
+            <option value="high" {% if request.query_params.get('severity') == 'high' %}selected{% endif %}>High</option>
+            <option value="medium" {% if request.query_params.get('severity') == 'medium' %}selected{% endif %}>Medium</option>
+            <option value="low" {% if request.query_params.get('severity') == 'low' %}selected{% endif %}>Low</option>
+        </select>
+        <button type="submit" class="btn btn-primary">Filter</button>
+    </div>
+ </form>
+    </div>
+
+    {% if reports %}
+        <div class="reports-grid">
+            {% for report in reports %}
+            <div class="card">
+                <div class="card__body">
+                    <div class="report-header">
+                        <h3>{{ report.repository_name }}</h3>
+                        <span class="status {% if report.severity == 'high' %}status--error{% elif report.severity == 'medium' %}status--warning{% else %}status--info{% endif %}">
+                            {{ report.severity.title() }} Risk
+                        </span>
+                    </div>
+                    
+                    <div class="report-details">
+                        <p><strong>Scan Type:</strong> {{ report.scan_type.title() }}</p>
+                        <p><strong>Findings:</strong> {{ report.findings_count }}</p>
+                        <p><strong>Date:</strong> {{ report.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                        <p><strong>Status:</strong> {{ report.status.title() }}</p>
+                    </div>
+                    
+                    <div class="report-actions">
+                        <a href="/report/{{ report._id }}" class="btn btn-sm btn-primary">View Details</a>
+                        <a href="mailto:?subject=Security%20Report%20for%20{{ report.repository_name|urlencode }}&body=View%20the%20full%20report:%20{{ request.url_for('report_detail', report_id=report._id)|urlencode }}" 
+                           class="btn btn-sm btn-outline-secondary">
+                            Share via Email
+                        </a>
+                        <button class="btn btn-sm btn-danger" 
+                                onclick="deleteReport('{{ report._id }}')">
+                            Delete Report
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <h2>No Reports Yet</h2>
+            <p>No security reports have been generated yet. Run your first scan to get started!</p>
+            <a href="/scan" class="btn btn-primary">Start Scanning</a>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+/* ... (existing styles) ... */
+.filter-section {
+    max-width: 400px;
+    margin: 20px 0;
+}
+
+.input-group {
+    display: flex;
+}
+
+.form-select {
+    flex: 1;
+    border-radius: 4px 0 0 4px;
+}
+</style>
+
+<script>
+async function deleteReport(reportId) {
+    if (confirm('Are you sure you want to delete this report?')) {
+        try {
+            const response = await fetch(`/api/reports/${reportId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                alert('Report deleted successfully!');
+                location.reload();
+            } else {
+                const errorData = await response.json();
+                alert('Failed to delete report: ' + errorData.detail);
+            }
+        } catch (error) {
+            console.error('Error deleting report:', error);
+            alert('Error deleting report');
+        }
+    }
+}
+</script>
+{% endblock %}

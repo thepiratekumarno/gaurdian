@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Scan Results{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>Security Scan Results</h1>
+        <p>Found {{ findings|length }} potential security issue(s)</p>
+    </div>
+
+    {% if findings %}
+        <div class="results-section">
+            <div class="scan-summary">
+                <h2>⚠️ Security Issues Detected</h2>
+                <p>The following secrets were found in your code:</p>
+            </div>
+
+            {% for finding in findings %}
+            <div class="card finding-card">
+                <div class="card__body">
+                    <div class="finding-header">
+                        <h3>{{ finding.type }}</h3>
+                        <span class="status status--error">
+                            {{ "%.0f" | format(finding.confidence * 100) }}% confidence
+                        </span>
+                    </div>
+                    
+                    <div class="finding-details">
+                        <p><strong>Line:</strong> {{ finding.line }}</p>
+                        <p><strong>Context:</strong></p>
+                        <pre><code>{{ finding.context }}</code></pre>
+                        
+                        <div class="recommendation">
+                            <h4>💡 Recommendation:</h4>
+                            <p>{{ finding.recommendation }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="results-section">
+            <div class="scan-summary">
+                <h2>✅ No Issues Found</h2>
+                <p>Great! No security issues were detected in your code.</p>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="scan-actions">
+        <a href="/scan" class="btn btn--secondary">Scan More Code</a>
+        <a href="/dashboard" class="btn btn--primary">Back to Dashboard</a>
+    </div>
+</div>
+
+<style>
+.finding-card {
+    margin-bottom: 1rem;
+    border-left: 4px solid var(--color-error);
+}
+
+.finding-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.finding-details {
+    margin-top: 1rem;
+}
+
+.recommendation {
+    margin-top: 1rem;
+    padding: 1rem;
+    background-color: var(--color-bg-1);
+    border-radius: var(--radius-sm);
+}
+</style>
+{% endblock %}

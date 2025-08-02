@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+
+{% block title %}Repositories{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>Monitored Repositories</h1>
+        <p>Manage your repository monitoring settings</p>
+    </div>
+
+    {% if scan_success %}
+    <div class="alert alert-success">
+        Repository scanned successfully!
+    </div>
+    {% endif %}
+
+    {% if scan_complete %}
+    <div class="alert alert-info">
+        Scan completed successfully! No new findings detected.
+    </div>
+    {% endif %}
+    
+    {% if scan_error %}
+    <div class="alert alert-danger">
+        Failed to scan repository. Please try again.
+    </div>
+    {% endif %}
+
+    {% if github_repos %}
+    <div class="github-repos-section">
+        <h2>Your GitHub Repositories</h2>
+        <div class="repositories-grid">
+            {% for repo in github_repos %}
+            <div class="card">
+                <div class="card__body">
+                    <div class="repo-header">
+                        <h3>{{ repo.name }}</h3>
+                        <span class="status status--success">Connected</span>
+                    </div>
+                    
+                    <div class="repo-details">
+                        <p><strong>URL:</strong> <a href="{{ repo.html_url }}" target="_blank">{{ repo.html_url }}</a></p>
+                    </div>
+                    
+                    <div class="repo-actions">
+                        <button class="btn btn--sm btn--primary" 
+                                onclick="addRepository('{{ repo.name }}', '{{ repo.html_url }}')">
+                            Add to Monitoring
+                        </button>
+                        <button class="btn btn--sm btn--danger" onclick="deleteRepository('{{ repo._id }}')">
+                        Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if repositories %}
+        <div class="repositories-list">
+            <h2>Currently Monitored Repositories</h2>
+            {% for repo in repositories %}
+            <div class="card">
+                <div class="card__body">
+                    <div class="repo-header">
+                        <h3>{{ repo.repository_name }}</h3>
+                        <span class="status {% if repo.is_monitored %}status--success{% else %}status--info{% endif %}">
+                            {% if repo.is_monitored %}Monitored{% else %}Not Monitored{% endif %}
+                        </span>
+                    </div>
+                    
+                    <div class="repo-details">
+                        <p><strong>URL:</strong> <a href="{{ repo.repository_url }}" target="_blank">{{ repo.repository_url }}</a></p>
+                        <p><strong>Added:</strong> {{ repo.added_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                        {% if repo.last_scan %}
+                        <p><strong>Last Scan:</strong> {{ repo.last_scan.strftime('%Y-%m-%d %H:%M') }}</p>
+                        {% else %}
+                        <p><strong>Last Scan:</strong> Never</p>
+                        {% endif %}
+                        <p><strong>Total Findings:</strong> {{ repo.findings_count }}</p>
+                    </div>
+                    
+                    <div class="repo-actions">
+                        {% if repo.is_monitored %}
+                        <button class="btn btn--sm btn--secondary" onclick="toggleMonitoring('{{ repo._id }}', false)">
+                            Stop Monitoring
+                        </button>
+                        {% else %}
+                        <button class="btn btn--sm btn--primary" onclick="toggleMonitoring('{{ repo._id }}', true)">
+                            Start Monitoring
+                        </button>
+                         <button class="btn btn--sm btn--danger" 
+                        onclick="deleteRepository('{{ repo._id }}')">
+                    Delete
+                         </button>
+                        {% endif %}
+                        <a href="/repositories/{{ repo._id }}/scan" class="btn btn--sm btn--outline">Manual Scan</a>
+                        <a href="/reports?repository={{ repo.repository_name }}" class="btn btn--sm btn--info">View Reports</a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <h2>No Repositories</h2>
+            <p>No repositories are being monitored yet. Add your repositories to start monitoring.</p>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+/* ... (existing styles) ... */
+.alert {
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+}
+
+.alert-success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.alert-danger {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+</style>
+
+<script>
+async function toggleMonitoring(repoId, enable) {
+    try {
+        const response = await fetch(`/api/repositories/${repoId}/monitoring`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ is_monitored: enable })
+        });
+        
+        if (response.ok) {
+            // Show success message
+            alert('Monitoring status updated successfully!');
+            location.reload();
+        } else {
+            const errorData = await response.json();
+            alert('Failed to update monitoring status: ' + errorData.detail);
+        }
+    } catch (error) {
+        console.error('Error updating monitoring status:', error);
+        alert('Error updating monitoring status');
+    }
+}
+
+async function addRepository(name, url) {
+    try {
+        const response = await fetch('/api/repositories', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+                repository_name: name,
+                repository_url: url 
+            })
+        });
+        
+        if (response.ok) {
+            alert('Repository added to monitoring!');
+            location.reload();
+        } else {
+            const errorData = await response.json();
+            alert('Failed to add repository: ' + errorData.detail);
+        }
+    } catch (error) {
+        console.error('Error adding repository:', error);
+        alert('Error adding repository');
+    }
+}
+
+async function deleteRepository(repoId) {
+    if (confirm('Are you sure you want to delete this repository?')) {
+        try {
+            const response = await fetch(`/api/repositories/${repoId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                alert('Repository deleted!');
+                location.reload();
+            } else {
+                const errorData = await response.json();
+                alert('Failed to delete repository: ' + errorData.detail);
+            }
+        } catch (error) {
+            console.error('Error deleting repository:', error);
+            alert('Error deleting repository');
+        }
+    }
+}
+
+async function deleteRepository(repoId) {
+    if (confirm('Are you sure you want to delete this repository?')) {
+        try {
+            const response = await fetch(`/api/repositories/${repoId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                alert('Repository deleted!');
+                location.reload();
+            } else {
+                const errorData = await response.json();
+                alert('Failed to delete repository: ' + errorData.detail);
+            }
+        } catch (error) {
+            console.error('Error deleting repository:', error);
+            alert('Error deleting repository');
+        }
+    }
+}
+
+</script>
+{% endblock %}

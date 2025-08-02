@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title text-center mb-4">🛡️ SecretGuardian</h2>
+                <p class="text-center text-muted mb-4">Protect your repositories from exposed secrets</p>
+                
+                <div class="d-grid gap-2">
+                    <a href="/auth/github" class="btn btn-dark btn-lg">
+                        <i class="fab fa-github"></i> Login with GitHub
+                    </a>
+                    <a href="/auth/google" class="btn btn-danger btn-lg">
+                        <i class="fab fa-google"></i> Login with Google
+                    </a>
+                </div>
+                
+                <hr class="my-4">
+                
+                <form method="post" action="/token">
+                    <div class="mb-3">
+                        <input type="text" name="username" class="form-control" placeholder="Username" required>
+                    </div>
+                    <div class="mb-3">
+                        <input type="password" name="password" class="form-control" placeholder="Password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Demo Login</button>
+                </form>
+                
+                <p class="text-center mt-3 small text-muted">
+                    Demo credentials: admin / admin
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

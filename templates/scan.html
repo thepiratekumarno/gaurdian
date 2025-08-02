@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Scan Code{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>Code Security Scanner</h1>
+        <p>Scan your code for exposed secrets and credentials</p>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <form method="post" action="/scan">
+                <div class="mb-3">
+                    <label class="form-label">Paste your code here:</label>
+                    <textarea name="code" class="form-control code-textarea" rows="15" placeholder="Paste code to scan..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg w-100">Scan for Secrets</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="info-section mt-5">
+        <h2>What We Detect</h2>
+        <div class="detection-types">
+            <div class="detection-item">
+                <strong>AWS Credentials</strong>
+                <p>Access keys, secret keys, and session tokens</p>
+            </div>
+            <div class="detection-item">
+                <strong>API Keys</strong>
+                <p>Google, Stripe, SendGrid, and other service keys</p>
+            </div>
+            <div class="detection-item">
+                <strong>Database Credentials</strong>
+                <p>MongoDB, PostgreSQL, MySQL connection strings</p>
+            </div>
+            <div class="detection-item">
+                <strong>Private Keys</strong>
+                <p>SSH keys, RSA private keys, and PGP keys</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.code-textarea {
+    font-family: monospace;
+    font-size: 14px;
+    padding: 15px;
+    background: #f8f9fa;
+    border: 2px dashed #dee2e6;
+    border-radius: 8px;
+    transition: all 0.3s;
+}
+
+.code-textarea:focus {
+    background: #fff;
+    border: 2px solid #0d6efd;
+}
+
+.detection-types {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+}
+
+.detection-item {
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+</style>
+{% endblock %}
