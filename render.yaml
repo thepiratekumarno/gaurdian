@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: secretguardian
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: ./start.sh
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: MONGO_URI
+        fromDatabase:
+          name: secretguardian-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: BASE_URL
+        value: https://your-app-name.onrender.com
+    # Add other environment variables here
+databases:
+  - name: secretguardian-db
+    databaseName: secretguardian_db
+    user: secretguardian
