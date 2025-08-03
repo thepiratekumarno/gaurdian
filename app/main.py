@@ -358,6 +358,8 @@ async def repositories_page(request: Request):
     if not user:
         return RedirectResponse(url="/")
     
+    base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
+    webhook_url = f"{base_url}/github-webhook"
 
     try:
         repositories = await crud.get_user_repositories(user['email'])
@@ -381,7 +383,8 @@ async def repositories_page(request: Request):
             "scan_complete": scan_complete,
             "scan_success": scan_success,
             "repositories": repositories,
-            "github_repos": github_repos
+            "github_repos": github_repos,
+            "webhook_url": webhook_url
         })
     except Exception as e:
         logger.error(f"Repositories page error: {e}")
@@ -642,26 +645,22 @@ async def scan_repository(request: Request, repo_id: str, user_email: str):
             scan_type="scheduled" if repo["is_monitored"] else "manual"
         )
         
-        # Update repository with scan info
+         # Update repository with scan info
         await db.repositories.update_one(
             {"_id": ObjectId(repo_id)},
             {
                 "$set": {
                     "last_scan": datetime.utcnow(),
-                    "findings_count": len(all_findings)
+                    "findings_count": len(all_findings),
+                    "scan_status": "completed"
                 }
             }
         )
         
-        # Send email notification if findings
-        if all_findings:
-            await email_service.send_security_alert(
-                user_email,
-                f"Security Alert for {repo['repository_name']}",
-                all_findings,
-                str(report["_id"])
-            )
-            
+        # Set session flag for UI notification
+        request.session["scan_success"] = True
+        request.session["scanned_repo"] = repo["repository_name"]
+        
         return True
     
     except Exception as e:
@@ -804,6 +803,15 @@ async def test_email(request: Request):
         "test-report-123"
     )
     return {"status": "Test email sent"}
+
+@app.post("/clear-scan-notification")
+async def clear_scan_notification(request: Request):
+    """Clear scan success notification from session"""
+    if "scan_success" in request.session:
+        del request.session["scan_success"]
+    if "scanned_repo" in request.session:
+        del request.session["scanned_repo"]
+    return {"status": "success"}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
