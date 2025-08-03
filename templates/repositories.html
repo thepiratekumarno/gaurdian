@@ -10,10 +10,34 @@
     </div>
 
     {% if scan_success %}
-    <div class="alert alert-success">
-        Repository scanned successfully!
+    <div class="alert alert-success alert-dismissible fade show">
+        Repository <strong>{{ request.session.scanned_repo }}</strong> scanned successfully!
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
     {% endif %}
+
+
+    <!-- Webhook setup instructions -->
+    <div class="card mb-4">
+        <div class="card-header bg-info text-white">
+            <h5>Automatic Scanning Setup</h5>
+        </div>
+        <div class="card-body">
+            <p>To enable automatic scanning when you push changes to GitHub:</p>
+            <ol>
+                <li>Go to your repository on GitHub</li>
+                <li>Click on <strong>Settings</strong> > <strong>Webhooks</strong></li>
+                <li>Click <strong>Add webhook</strong></li>
+                <li>Set Payload URL to: <code>{{ webhook_url }}</code></li>
+                <li>Set Content type to <code>application/json</code></li>
+                <li>Select <strong>Send me everything</strong> for events</li>
+                <li>Add webhook</li>
+            </ol>
+            <div class="alert alert-warning">
+                <strong>Note:</strong> You only need to do this once per repository
+            </div>
+        </div>
+    </div>
 
     {% if scan_complete %}
     <div class="alert alert-info">
@@ -225,6 +249,18 @@ async function deleteRepository(repoId) {
         }
     }
 }
+
+// Automatically show notification if scan was successful
+document.addEventListener('DOMContentLoaded', function() {
+        {% if scan_success %}
+        // Show toast notification
+        const toast = new bootstrap.Toast(document.getElementById('scanToast'));
+        toast.show();
+        
+        // Clear session flags
+        fetch('/clear-scan-notification', { method: 'POST' });
+        {% endif %}
+});
 
 </script>
 {% endblock %}
