@@ -26,6 +26,9 @@ from .github_integration import start_scan_worker
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from .github_integration import scan_and_notify
+from .filters import init_filters
+
 load_dotenv()
 
 # Configure logging
@@ -57,6 +60,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -464,19 +469,52 @@ async def toggle_repository_monitoring(repo_id: str, request: Request, backgroun
         logger.error(f"Toggle monitoring error: {e}")
         raise HTTPException(status_code=500, detail="Failed to update monitoring status")
 
+
+# Setup templates
+templates = Jinja2Templates(directory="templates")
+init_filters(templates.env)
+
+
 @app.get("/repositories/{repo_id}/scan")
-async def manual_scan_repository(repo_id: str, request: Request, background_tasks: BackgroundTasks):
-    """Trigger a manual scan of a repository"""
+async def manual_scan_repository(repo_id: str, request: Request):
+    """Manual scan with guaranteed notifications"""
     user = auth.get_current_user(request)
     if not user:
         return RedirectResponse(url="/")
     
     try:
-        background_tasks.add_task(scan_repository, request, repo_id, user["email"])
-        return RedirectResponse(url=f"/repositories?scan_started=true")
+        db = await database.get_database()
+        repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
+        
+        if not repo or repo["user_email"] != user["email"]:
+            return RedirectResponse(url="/repositories?error=not_found")
+        
+        # Get access token
+        access_token = request.session.get("github_access_token") or os.getenv("GITHUB_ACCESS_TOKEN")
+        if not access_token:
+            return RedirectResponse(url="/repositories?error=no_token")
+        
+        # Trigger scan
+        asyncio.create_task(
+            scan_and_notify(
+                repo_id,
+                user["email"],
+                access_token,
+                repo["repository_name"]
+            )
+        )
+        
+        # Set session notification
+        request.session["scan_notification"] = {
+            "type": "info",
+            "message": f"Scan started for {repo['repository_name']}"
+        }
+        
+        return RedirectResponse(url="/repositories?scan_started=true")
+        
     except Exception as e:
         logger.error(f"Manual scan error: {e}")
-        return RedirectResponse(url=f"/repositories?scan_error=true")
+        return RedirectResponse(url="/repositories?error=scan_failed")
 
 @app.delete("/api/repositories/{repo_id}")
 async def delete_repository(repo_id: str, request: Request):
