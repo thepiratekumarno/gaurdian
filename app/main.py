@@ -155,29 +155,13 @@ async def github_callback(request: Request):
     """Handle GitHub OAuth callback"""
     try:
         logger.info("GitHub callback received")
-        user_info = await oauth_manager.github_callback(request)
+        # oauth_manager.github_callback already handles everything and returns RedirectResponse
+        return await oauth_manager.github_callback(request)
         
-        # Store user in session
-        request.session["user"] = user_info
-        
-        # Create or update user in database
-        await crud.create_or_get_user(
-            email=user_info["email"],
-            username=user_info["username"],
-            full_name=user_info["name"] or user_info["username"],
-            provider=user_info["provider"],
-            provider_id=user_info["id"]
-        )
-        
-        logger.info(f"GitHub user successfully authenticated: {user_info['email']}")
-        return RedirectResponse(url="/dashboard")
-        
-    except HTTPException as e:
-        logger.error(f"GitHub auth error: {e.detail}")
-        return RedirectResponse(url="/?error=github_auth_failed")
     except Exception as e:
         logger.error(f"GitHub callback error: {e}", exc_info=True)
         return RedirectResponse(url="/?error=github_auth_failed")
+
 
 # Google OAuth routes
 @app.get("/auth/google")
