@@ -10,6 +10,7 @@ import logging
 
 
 
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -350,7 +351,7 @@ async def send_scan_notification(recipient_email: str, repo_name: str, success: 
     message = MIMEMultipart("alternative")
     subject = f"✅ Scan Complete: {repo_name}" if success else f"❌ Scan Failed: {repo_name}"
     message["Subject"] = subject
-    message["From"] = email_from
+    message["From"] = smtp_user
     message["To"] = recipient_email
     
     # Create content
