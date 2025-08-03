@@ -21,6 +21,10 @@ from fastapi import BackgroundTasks  # Add this import
 
 # Import oauth_manager
 from .auth import oauth_manager
+import asyncio
+from .github_integration import start_scan_worker
+
+from fastapi import WebSocket, WebSocketDisconnect
 
 load_dotenv()
 
@@ -64,6 +68,7 @@ templates = Jinja2Templates(directory="templates")
 async def startup_event():
     """Initialize database connection on startup"""
     await database.connect_to_mongo()
+    await start_scan_worker()  # Start scan worker
     logger.info("Application started successfully")
 
 @app.on_event("shutdown")
@@ -353,14 +358,11 @@ async def report_detail(request: Request, report_id: str):
 
 @app.get("/repositories", response_class=HTMLResponse)
 async def repositories_page(request: Request):
-    """Display repositories page - requires authentication"""
+    """Display repositories page with scan status"""
     user = auth.get_current_user(request)
     if not user:
         return RedirectResponse(url="/")
     
-    base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
-    webhook_url = f"{base_url}/github-webhook"
-
     try:
         repositories = await crud.get_user_repositories(user['email'])
         
@@ -377,14 +379,17 @@ async def repositories_page(request: Request):
         scan_complete = request.query_params.get("scan_complete") == "true"
         scan_success = request.query_params.get("scan_success") == "true"
         
+        # Get scan notifications from session
+        scan_notification = request.session.pop("scan_notification", None)
+        
         return templates.TemplateResponse("repositories.html", {
             "request": request,
             "user": user,
             "scan_complete": scan_complete,
             "scan_success": scan_success,
+            "scan_notification": scan_notification,
             "repositories": repositories,
-            "github_repos": github_repos,
-            "webhook_url": webhook_url
+            "github_repos": github_repos
         })
     except Exception as e:
         logger.error(f"Repositories page error: {e}")
@@ -817,3 +822,37 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     host = os.getenv("HOST", "0.0.0.0")
     uvicorn.run("app.main:app", host=host, port=port)
+    
+@app.websocket("/ws/scan-status")
+async def websocket_scan_status(websocket: WebSocket):
+    """WebSocket for real-time scan status updates"""
+    await websocket.accept()
+    try:
+        while True:
+            # In a real implementation, we'd push updates here
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+
+@app.get("/api/scan-status/{repo_id}")
+async def get_scan_status(repo_id: str, request: Request):
+    """Get scan status for a repository"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    try:
+        db = await database.get_database()
+        repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
+        
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found")
+        
+        return {
+            "status": repo.get("scan_status", "unknown"),
+            "last_scan": repo.get("last_scan", None),
+            "findings_count": repo.get("findings_count", 0)
+        }
+    except Exception as e:
+        logger.error(f"Scan status error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get scan status")
