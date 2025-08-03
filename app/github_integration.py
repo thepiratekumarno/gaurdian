@@ -1,6 +1,9 @@
+# app/github_integration.py - COMPLETE FIXED VERSION
+
 import hashlib
 import hmac
 import json
+import os
 from fastapi import Request, HTTPException
 from typing import Dict, Any, List
 from bson import ObjectId
@@ -13,10 +16,13 @@ import asyncio
 from . import detector, crud, email_service, database
 
 load_dotenv()
+
 logger = logging.getLogger(__name__)
 
+## UPDATE your existing handle_webhook function to include user repo handling
+
 async def handle_webhook(request: Request) -> Dict[str, Any]:
-    """Simplified and reliable webhook handling"""
+    """Enhanced webhook handling for both organization and user events"""
     try:
         # Verify webhook signature
         signature = request.headers.get("X-Hub-Signature-256", "")
@@ -36,177 +42,209 @@ async def handle_webhook(request: Request) -> Dict[str, Any]:
         # Get event type
         event_type = request.headers.get("X-GitHub-Event")
         payload = await request.json()
-
-        # Handle repository creation
+        
+        logger.info(f"Received webhook event: {event_type}")
+        
+        # Handle repository creation - BOTH org and user repos
         if event_type == "repository" and payload.get("action") in ["created", "publicized"]:
-            return await handle_repo_created(payload)
-
-        # Handle push events
+            # Check if this is an organization event or user event
+            repository = payload.get("repository", {})
+            owner = repository.get("owner", {})
+            owner_type = owner.get("type", "").lower()
+            
+            if owner_type == "organization":
+                return await handle_repo_created(payload)  # Your existing org handler
+            else:
+                return await handle_user_repo_created(payload)  # New user handler
+        
+        # Handle push events to existing repositories
         elif event_type == "push":
             return await handle_push_event(payload)
-
-        return {"message": f"Event type '{event_type}' not handled"}
-
+        
+        # Handle repository deletion
+        elif event_type == "repository" and payload.get("action") == "deleted":
+            return await handle_repo_deleted(payload)
+        
+        return {"message": f"Event type '{event_type}' processed"}
+        
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Webhook processing failed")
-    # Add case for repository deletion
-    if event_type == "repository" and action == "deleted":
-        return await handle_repo_deleted(payload)
-    
-async def handle_repo_deleted(payload: Dict[str, Any]):
-    """Handle repository deletion event"""
-    try:
-        repository = payload.get("repository", {})
-        repo_name = repository.get("full_name", "unknown")
-        
-        db = await database.get_database()
-        result = await db.repositories.delete_one(
-            {"repository_name": repo_name}
-        )
-        
-        # Automatically stop any scheduled scans
-        # (Implementation depends on your scheduler)
-        
-        return {"status": "repository removed", "deleted_count": result.deleted_count}
-    except Exception as e:
-        logger.error(f"Error deleting repository: {e}")
-        return {"status": "error", "error": str(e)}
 
 async def handle_repo_created(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Direct repository scanning without queues"""
+    """Handle repository creation event - ENHANCED VERSION"""
     try:
         repository = payload.get("repository", {})
         sender = payload.get("sender", {})
         
         repo_name = repository.get("full_name", "unknown")
         repo_url = repository.get("html_url", "")
-        owner = sender.get("login", "unknown")
-        user_email = sender.get("email", f"{owner}@users.noreply.github.com")
+        owner = repository.get("owner", {})
+        owner_login = owner.get("login", "unknown")
+        
+        # Get user email - try multiple sources
+        user_email = sender.get("email")
+        if not user_email:
+            # If no email in sender, use a fallback
+            user_email = f"{owner_login}@users.noreply.github.com"
+        
+        logger.info(f"Processing repository creation: {repo_name} by {owner_login}")
+        
+        # Check if repository is private or public
+        is_private = repository.get("private", False)
         
         # Add repository to database
         db = await database.get_database()
+        
+        # Check if repository already exists
+        existing_repo = await db.repositories.find_one({
+            "repository_name": repo_name,
+            "user_email": user_email
+        })
+        
+        if existing_repo:
+            logger.info(f"Repository {repo_name} already exists in database")
+            return {"status": "repository already exists", "repo_id": str(existing_repo["_id"])}
+        
         repo_data = {
             "user_email": user_email,
             "repository_name": repo_name,
             "repository_url": repo_url,
-            "is_monitored": True,
+            "is_monitored": True,  # Auto-enable monitoring for new repos
             "added_at": datetime.utcnow(),
             "last_scan": None,
             "findings_count": 0,
-            "scan_status": "scanning"
+            "scan_status": "pending",
+            "is_private": is_private,
+            "owner_login": owner_login,
+            "webhook_auto_created": True
         }
         
         result = await db.repositories.insert_one(repo_data)
         repo_id = str(result.inserted_id)
         
-        # Perform scan immediately
+        logger.info(f"Repository {repo_name} added to database with ID: {repo_id}")
+        
+        # Get access token for scanning
         access_token = os.getenv("GITHUB_ACCESS_TOKEN")
         if not access_token:
             logger.error("GitHub access token not configured")
             return {"status": "error", "error": "GitHub access token missing"}
         
+        # Trigger automatic scan immediately in background
         asyncio.create_task(scan_and_notify(repo_id, user_email, access_token, repo_name))
         
-        return {"status": "repository added and scan started", "repo_id": repo_id}
+        return {
+            "status": "repository added and scan started", 
+            "repo_id": repo_id,
+            "repository": repo_name,
+            "user_email": user_email
+        }
+        
     except Exception as e:
-        logger.error(f"Error adding repository: {e}")
+        logger.error(f"Error handling repository creation: {e}", exc_info=True)
         return {"status": "error", "error": str(e)}
-    
-async def scan_worker():
-    """Background worker to process scan queue"""
-    while True:
-        try:
-            task = await scan_queue.get()
-            repo_id = task["repo_id"]
-            user_email = task["user_email"]
-            installation_id = task["installation_id"]
-            
-            # Get installation token
-            access_token = await get_installation_token(installation_id)
-            if not access_token:
-                access_token = os.getenv("GITHUB_ACCESS_TOKEN")
-            
-            # Perform scan
-            await scan_repository(repo_id, user_email, access_token)
-            
-        except Exception as e:
-            logger.error(f"Scan worker error: {e}")
-        finally:
-            scan_queue.task_done()   
-    
-async def get_installation_token(installation_id: int) -> str:
-    """Get installation access token for better permissions"""
-    if not installation_id:
-        return None
-        
-    try:
-        jwt_token = generate_jwt_token()
-        if not jwt_token:
-            return None
-            
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers)
-            if response.status_code == 201:
-                token_data = response.json()
-                return token_data.get("token")
-            else:
-                logger.error(f"Failed to get installation token: {response.status_code} {response.text}")
-    except Exception as e:
-        logger.error(f"Error getting installation token: {e}")
-    return None
 
-
-def generate_jwt_token() -> str:
-    """Generate JWT token for GitHub App authentication"""
+async def handle_repo_deleted(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle repository deletion event"""
     try:
-        # Load GitHub App credentials
-        app_id = os.getenv("GITHUB_APP_ID")
-        private_key = os.getenv("GITHUB_APP_PRIVATE_KEY")
+        repository = payload.get("repository", {})
+        repo_name = repository.get("full_name", "unknown")
         
-        if not app_id or not private_key:
-            logger.error("GitHub App credentials not configured")
-            return None
-            
-        # Generate JWT token
-        from jwt import encode
-        from time import time
+        db = await database.get_database()
         
-        payload = {
-            "iat": int(time()),
-            "exp": int(time()) + 600,  # 10 minutes expiration
-            "iss": app_id
+        # Delete repository from database
+        result = await db.repositories.delete_many({
+            "repository_name": repo_name
+        })
+        
+        # Also delete associated reports
+        reports_deleted = await db.reports.delete_many({
+            "repository_name": repo_name
+        })
+        
+        logger.info(f"Repository {repo_name} deleted from database. Repositories: {result.deleted_count}, Reports: {reports_deleted.deleted_count}")
+        
+        return {
+            "status": "repository removed", 
+            "repository": repo_name,
+            "repositories_deleted": result.deleted_count,
+            "reports_deleted": reports_deleted.deleted_count
         }
         
-        return encode(payload, private_key, algorithm="RS256")
+    except Exception as e:
+        logger.error(f"Error deleting repository: {e}")
+        return {"status": "error", "error": str(e)}
+
+async def handle_push_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle push events to trigger scans on existing repositories"""
+    try:
+        repository = payload.get("repository", {})
+        sender = payload.get("sender", {})
+        pusher = payload.get("pusher", {})
+        
+        repo_name = repository.get("full_name", "unknown")
+        owner = repository.get("owner", {}).get("login", "unknown")
+        
+        # Try to get user email from various sources
+        user_email = None
+        if pusher and pusher.get("email"):
+            user_email = pusher.get("email")
+        elif sender and sender.get("email"):
+            user_email = sender.get("email")
+        else:
+            user_email = f"{owner}@users.noreply.github.com"
+        
+        logger.info(f"Processing push event for repository: {repo_name}")
+        
+        # Find repository in database
+        db = await database.get_database()
+        repo = await db.repositories.find_one({
+            "repository_name": repo_name,
+            "is_monitored": True
+        })
+        
+        if not repo:
+            logger.info(f"Repository {repo_name} not found or not monitored")
+            return {"message": "Repository not monitored"}
+        
+        # Update user email if it was a fallback before
+        if repo.get("user_email", "").endswith("@users.noreply.github.com") and not user_email.endswith("@users.noreply.github.com"):
+            await db.repositories.update_one(
+                {"_id": repo["_id"]},
+                {"$set": {"user_email": user_email}}
+            )
+            repo["user_email"] = user_email
+        
+        # Trigger scan
+        access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+        if not access_token:
+            logger.error("GitHub access token not configured")
+            return {"message": "GitHub access token missing"}
+        
+        asyncio.create_task(scan_and_notify(str(repo["_id"]), repo["user_email"], access_token, repo_name))
+        
+        return {"message": "Scan triggered for repository push"}
         
     except Exception as e:
-        logger.error(f"Error generating JWT token: {e}")
-        return None
-
-
-# Start scan worker on application startup
-async def start_scan_worker():
-    asyncio.create_task(scan_worker())
+        logger.error(f"Error handling push event: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
 
 async def scan_and_notify(repo_id: str, user_email: str, access_token: str, repo_name: str):
-    """Unified scanning and notification function"""
+    """Enhanced scanning and notification function"""
     db = await database.get_database()
+    
     try:
+        logger.info(f"Starting scan for repository: {repo_name}")
+        
         # Update status to scanning
         await db.repositories.update_one(
             {"_id": ObjectId(repo_id)},
-            {"$set": {"scan_status": "scanning"}}
+            {"$set": {"scan_status": "scanning", "last_scan_started": datetime.utcnow()}}
         )
         
         # Perform the scan
-        scan_success, findings_count = await scan_repository(repo_id, user_email, access_token)
+        scan_success, findings_count = await scan_repository_enhanced(repo_id, user_email, access_token)
         
         # Update status and send notification
         if scan_success:
@@ -214,221 +252,379 @@ async def scan_and_notify(repo_id: str, user_email: str, access_token: str, repo
                 {"_id": ObjectId(repo_id)},
                 {"$set": {
                     "scan_status": "completed",
-                    "findings_count": findings_count
+                    "findings_count": findings_count,
+                    "last_scan_completed": datetime.utcnow()
                 }}
             )
-            # Send notification email
-            await email_service.send_scan_notification(
-                user_email,
-                repo_name,
-                True,
-                findings_count
-            )
+            
+            logger.info(f"Scan completed successfully for {repo_name}. Findings: {findings_count}")
+            
         else:
             await db.repositories.update_one(
                 {"_id": ObjectId(repo_id)},
-                {"$set": {"scan_status": "failed"}}
-            )
-            # Send failure email
-            await email_service.send_scan_notification(
-                user_email,
-                repo_name,
-                False,
-                0
+                {"$set": {
+                    "scan_status": "failed",
+                    "last_scan_completed": datetime.utcnow()
+                }}
             )
             
+            logger.error(f"Scan failed for {repo_name}")
+            
     except Exception as e:
-        logger.error(f"Scan and notify error: {e}")
+        logger.error(f"Scan and notify error for {repo_name}: {e}", exc_info=True)
+        
         await db.repositories.update_one(
             {"_id": ObjectId(repo_id)},
-            {"$set": {"scan_status": "failed"}}
+            {"$set": {
+                "scan_status": "failed",
+                "error_message": str(e),
+                "last_scan_completed": datetime.utcnow()
+            }}
         )
 
-
-async def scan_repository(repo_id: str, user_email: str, access_token: str) -> (bool, int):
-    """Simplified scanning function returns success and findings count"""
+async def scan_repository_enhanced(repo_id: str, user_email: str, access_token: str) -> tuple[bool, int]:
+    """Enhanced repository scanning with better error handling and email notifications"""
+    
     try:
         db = await database.get_database()
         repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
-        if not repo:
-            return False, 0
-            
-        repo_url = repo["repository_url"]
-        if "github.com" not in repo_url:
-            return False, 0
-            
-        parts = repo_url.split("github.com/")[1].split("/")
-        if len(parts) < 2:
-            return False, 0
-            
-        owner = parts[0]
-        repo_name = parts[1]
         
-        # Get default branch
+        if not repo:
+            logger.error(f"Repository with ID {repo_id} not found")
+            return False, 0
+        
+        repo_url = repo["repository_url"]
+        repo_name = repo["repository_name"]
+        
+        if "github.com" not in repo_url:
+            logger.error(f"Not a GitHub repository: {repo_url}")
+            return False, 0
+        
+        # Extract owner and repo name from URL or repository_name
+        if "/" in repo_name:
+            owner, repo_short_name = repo_name.split("/", 1)
+        else:
+            # Fallback: extract from URL
+            parts = repo_url.split("github.com/")[1].split("/")
+            if len(parts) < 2:
+                logger.error(f"Cannot parse repository URL: {repo_url}")
+                return False, 0
+            owner = parts[0]
+            repo_short_name = parts[1].replace(".git", "")
+        
         headers = {"Authorization": f"Bearer {access_token}"}
-        repo_info_url = f"https://api.github.com/repos/{owner}/{repo_name}"
+        
+        # Get repository information
+        repo_info_url = f"https://api.github.com/repos/{owner}/{repo_short_name}"
+        
         async with httpx.AsyncClient() as client:
             response = await client.get(repo_info_url, headers=headers)
-            if response.status_code != 200:
+            
+            if response.status_code == 404:
+                logger.error(f"Repository not found or access denied: {owner}/{repo_short_name}")
                 return False, 0
-            repo_info = response.json()
-            default_branch = repo_info.get("default_branch", "main")
+            elif response.status_code != 200:
+                logger.error(f"Failed to get repository info: {response.status_code} - {response.text}")
+                return False, 0
+        
+        repo_info = response.json()
+        default_branch = repo_info.get("default_branch", "main")
+        
+        logger.info(f"Scanning repository: {owner}/{repo_short_name}, branch: {default_branch}")
         
         # Get repository tree
-        tree_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/trees/{default_branch}?recursive=1"
+        tree_url = f"https://api.github.com/repos/{owner}/{repo_short_name}/git/trees/{default_branch}?recursive=1"
+        
         async with httpx.AsyncClient() as client:
             response = await client.get(tree_url, headers=headers)
+            
             if response.status_code != 200:
+                logger.error(f"Failed to get repository tree: {response.status_code} - {response.text}")
                 return False, 0
-            tree_data = response.json()
         
-        # Scan all files
+        tree_data = response.json()
+        
+        # Filter for text files only
+        def is_text_file(file_path: str) -> bool:
+            text_extensions = [
+                '.py', '.js', '.java', '.c', '.cpp', '.cs', '.php', '.rb', '.go', 
+                '.swift', '.kt', '.ts', '.html', '.css', '.json', '.yml', '.yaml', 
+                '.toml', '.ini', '.cfg', '.md', '.txt', '.env', '.sh', '.bat', 
+                '.ps1', '.sql', '.xml', '.csv', '.log', '.conf', '.config', '.dockerfile'
+            ]
+            return any(file_path.lower().endswith(ext) for ext in text_extensions)
+        
+        # Scan all text files
         all_findings = []
+        scanned_files_count = 0
+        
         for item in tree_data.get("tree", []):
-            if item["type"] != "blob" or item["size"] <= 0:
-                continue
+            if item["type"] == "blob" and item.get("size", 0) > 0:
+                file_path = item["path"]
                 
-            file_path = item["path"]
-            if any(file_path.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bin', '.zip']):
-                continue
-                
-            file_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}?ref={default_branch}"
-            async with httpx.AsyncClient() as client:
-                response = await client.get(file_url, headers=headers)
-                if response.status_code != 200:
+                if not is_text_file(file_path):
                     continue
                 
-                file_data = response.json()
-                if "content" not in file_data:
+                # Skip large files (> 1MB)
+                if item.get("size", 0) > 1024 * 1024:
+                    logger.info(f"Skipping large file: {file_path}")
                     continue
+                
+                file_url = f"https://api.github.com/repos/{owner}/{repo_short_name}/contents/{file_path}?ref={default_branch}"
                 
                 try:
-                    content = base64.b64decode(file_data["content"]).decode("utf-8")
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(file_url, headers=headers)
+                        
+                        if response.status_code != 200:
+                            logger.warning(f"Failed to get file content: {file_path} - {response.status_code}")
+                            continue
+                    
+                    file_data = response.json()
+                    
+                    if "content" not in file_data:
+                        continue
+                    
+                    # Decode file content
+                    try:
+                        content = base64.b64decode(file_data["content"]).decode("utf-8")
+                    except UnicodeDecodeError:
+                        logger.warning(f"Cannot decode file as UTF-8: {file_path}")
+                        continue
+                    
+                    # Scan for secrets
                     findings = detector.scan_text(content)
+                    
                     for finding in findings:
                         finding["location"] = f"File: {file_path}"
+                        finding["repository"] = repo_name
                         all_findings.append(finding)
-                except Exception:
+                    
+                    scanned_files_count += 1
+                    
+                    if findings:
+                        logger.info(f"Found {len(findings)} potential secrets in {file_path}")
+                
+                except Exception as e:
+                    logger.error(f"Error processing file {file_path}: {e}")
                     continue
+        
+        logger.info(f"Scanned {scanned_files_count} files, found {len(all_findings)} potential secrets")
         
         # Create report
         report = await crud.create_report(
             user_email=user_email,
-            repository_name=repo["repository_name"],
+            repository_name=repo_name,
             findings=all_findings,
             scan_type="automatic"
         )
         
-        # Update last scan time
+        # Update repository with scan results
         await db.repositories.update_one(
             {"_id": ObjectId(repo_id)},
-            {"$set": {"last_scan": datetime.utcnow()}}
+            {"$set": {
+                "last_scan": datetime.utcnow(),
+                "findings_count": len(all_findings),
+                "scanned_files_count": scanned_files_count
+            }}
         )
         
-        # Send security alert
-        if all_findings:
-            await email_service.send_security_alert(
-                user_email,
-                f"Security Alert for {repo['repository_name']}",
-                all_findings,
-                str(report["_id"])
+        # Send email notification
+        try:
+            if all_findings:
+                await email_service.send_security_alert(
+                    user_email,
+                    f"🚨 Security Alert: {repo_name} - {len(all_findings)} secrets found",
+                    all_findings,
+                    str(report["_id"])
+                )
+                logger.info(f"Security alert sent to {user_email} for {len(all_findings)} findings in {repo_name}")
+            else:
+                await email_service.send_no_findings_alert(
+                    user_email,
+                    repo_name,
+                    str(report["_id"])
+                )
+                logger.info(f"Clean scan notification sent to {user_email} for {repo_name}")
                 
-            )
-        else:
-            await email_service.send_no_findings_alert(
-                user_email,
-                repo["repository_name"],
-                str(report["_id"])
-                
-            )
+        except Exception as email_error:
+            logger.error(f"Failed to send email notification: {email_error}")
+            # Don't fail the scan if email fails
         
         return True, len(all_findings)
         
     except Exception as e:
-        logger.error(f"Repository scan error: {e}")
+        logger.error(f"Repository scan error: {e}", exc_info=True)
         return False, 0
 
+# Helper functions for GitHub API integration
 
-async def handle_push_event(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Trigger scan on push events"""
-    repository = payload.get("repository", {})
-    sender = payload.get("sender", {})
+async def create_organization_webhook(org_name: str, webhook_url: str, webhook_secret: str, access_token: str) -> Dict[str, Any]:
+    """Create an organization-level webhook to catch all repository events"""
     
-    repo_name = repository.get("full_name", "unknown")
-    owner = repository.get("owner", {}).get("login", "unknown")
-    user_email = sender.get("email", f"{owner}@users.noreply.github.com")
+    try:
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        
+        webhook_data = {
+            "name": "web",
+            "active": True,
+            "events": [
+                "repository",  # Repository created, deleted, etc.
+                "push",        # Push events
+                "pull_request" # Optional: PR events
+            ],
+            "config": {
+                "url": webhook_url,
+                "content_type": "json",
+                "secret": webhook_secret,
+                "insecure_ssl": "0"
+            }
+        }
+        
+        url = f"https://api.github.com/orgs/{org_name}/hooks"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=webhook_data)
+            
+            if response.status_code == 201:
+                webhook_info = response.json()
+                logger.info(f"Organization webhook created successfully for {org_name}")
+                return {"status": "success", "webhook_id": webhook_info["id"]}
+            else:
+                logger.error(f"Failed to create organization webhook: {response.status_code} - {response.text}")
+                return {"status": "error", "error": response.text}
+                
+    except Exception as e:
+        logger.error(f"Error creating organization webhook: {e}")
+        return {"status": "error", "error": str(e)}
+
+async def setup_organization_webhook(org_name: str) -> Dict[str, Any]:
+    """Setup organization webhook for automatic repository detection"""
     
-    # Find repository in database
-    db = await database.get_database()
-    repo = await db.repositories.find_one({
-        "repository_name": repo_name,
-        "user_email": user_email,
-        "is_monitored": True
-    })
-    
-    if not repo:
-        return {"message": "Repository not monitored"}
-    
-    # Trigger scan
     access_token = os.getenv("GITHUB_ACCESS_TOKEN")
-    if not access_token:
-        return {"message": "GitHub access token missing"}
+    webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
+    base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
     
-    asyncio.create_task(scan_and_notify(str(repo["_id"]), user_email, access_token, repo_name))
+    if not all([access_token, webhook_secret, base_url]):
+        return {"status": "error", "error": "Missing required configuration"}
     
-    return {"message": "Scan triggered for repository"}
+    webhook_url = f"{base_url}/github-webhook"
+    
+    return await create_organization_webhook(org_name, webhook_url, webhook_secret, access_token)
 
-async def scan_commit(commit: Dict[str, Any], repo_name: str, owner: str) -> list:
-    """Scan a single commit for secrets"""
-    findings = []
-    
-    # Get commit details
-    commit_id = commit.get("id", "")
-    commit_message = commit.get("message", "")
-    added_files = commit.get("added", [])
-    modified_files = commit.get("modified", [])
-    removed_files = commit.get("removed", [])
-    
-    # Scan commit message
-    message_findings = detector.scan_text(commit_message)
-    for finding in message_findings:
-        finding["location"] = f"Commit message: {commit_id[:8]}"
-        findings.append(finding)
-    
-    # Scan files using GitHub API
-    access_token = os.getenv("GITHUB_ACCESS_TOKEN", os.getenv("GITHUB_CLIENT_SECRET"))
-    headers = {
-        "Authorization": f"token {access_token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
-    all_files = added_files + modified_files
-    for file_path in all_files:
+# Background task management
+scan_queue = asyncio.Queue()
+
+async def scan_worker():
+    """Background worker to process scan queue"""
+    while True:
         try:
-            # Skip binary files
-            if any(ext in file_path for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bin']):
-                continue
-                
-            # Fetch file content
-            file_url = f"https://api.github.com/repos/{repo_name}/contents/{file_path}?ref={commit_id}"
-            async with httpx.AsyncClient() as client:
-                response = await client.get(file_url, headers=headers)
-                if response.status_code != 200:
-                    continue
-                    
-                file_data = response.json()
-                if "content" not in file_data:
-                    continue
-                    
-                # Decode content
-                content = base64.b64decode(file_data["content"]).decode("utf-8")
-                
-                # Scan content
-                content_findings = detector.scan_text(content)
-                for finding in content_findings:
-                    finding["location"] = f"File: {file_path}"
-                    findings.append(finding)
+            task = await scan_queue.get()
+            repo_id = task["repo_id"]
+            user_email = task["user_email"]
+            access_token = task["access_token"]
+            repo_name = task["repo_name"]
+            
+            await scan_and_notify(repo_id, user_email, access_token, repo_name)
+            
         except Exception as e:
-            print(f"Error scanning file {file_path}: {str(e)}")
-    
-    return findings
+            logger.error(f"Scan worker error: {e}")
+        finally:
+            scan_queue.task_done()
+            
+## ADD this function to your existing github_integration.py
+
+async def handle_user_repo_created(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle repository creation for individual users (not just organizations)"""
+    try:
+        repository = payload.get("repository", {})
+        sender = payload.get("sender", {})
+        
+        repo_name = repository.get("full_name", "unknown")
+        repo_url = repository.get("html_url", "")
+        owner = repository.get("owner", {})
+        owner_login = owner.get("login", "unknown")
+        
+        # For personal repos, we need to find the user by GitHub username
+        user_email = sender.get("email")
+        if not user_email:
+            user_email = f"{owner_login}@users.noreply.github.com"
+        
+        logger.info(f"Processing personal repository creation: {repo_name} by {owner_login}")
+        
+        # Find user in database by GitHub username or email
+        db = await database.get_database()
+        
+        # Try to find user by username first, then by email
+        user = await db.users.find_one({
+            "$or": [
+                {"username": owner_login},
+                {"email": user_email},
+                {"provider_id": str(sender.get("id", ""))}
+            ]
+        })
+        
+        if not user:
+            logger.warning(f"User not found for repository {repo_name}, owner: {owner_login}")
+            return {"status": "user not found", "repo": repo_name}
+        
+        user_email = user["email"]
+        
+        # Check if repository already exists
+        existing_repo = await db.repositories.find_one({
+            "repository_name": repo_name,
+            "user_email": user_email
+        })
+        
+        if existing_repo:
+            logger.info(f"Repository {repo_name} already exists in database")
+            return {"status": "repository already exists", "repo_id": str(existing_repo["_id"])}
+        
+        # Add repository to database
+        repo_data = {
+            "user_email": user_email,
+            "repository_name": repo_name,
+            "repository_url": repo_url,
+            "is_monitored": True,  # Auto-enable monitoring for new repos
+            "added_at": datetime.utcnow(),
+            "last_scan": None,
+            "findings_count": 0,
+            "scan_status": "pending",
+            "is_private": repository.get("private", False),
+            "owner_login": owner_login,
+            "webhook_auto_created": True
+        }
+        
+        result = await db.repositories.insert_one(repo_data)
+        repo_id = str(result.inserted_id)
+        
+        logger.info(f"Repository {repo_name} added to database with ID: {repo_id}")
+        
+        # Get user's GitHub token for scanning
+        github_token = user.get("github_access_token")
+        if not github_token:
+            logger.error(f"No GitHub token found for user {user_email}")
+            return {"status": "error", "error": "GitHub token missing for user"}
+        
+        # Trigger automatic scan immediately in background
+        asyncio.create_task(scan_and_notify(repo_id, user_email, github_token, repo_name))
+        
+        return {
+            "status": "repository added and scan started", 
+            "repo_id": repo_id,
+            "repository": repo_name,
+            "user_email": user_email
+        }
+        
+    except Exception as e:
+        logger.error(f"Error handling user repository creation: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+async def start_scan_worker():
+    """Start the background scan worker"""
+    asyncio.create_task(scan_worker())
+    logger.info("Scan worker started")
