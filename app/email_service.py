@@ -6,9 +6,14 @@ from email.header import Header  # Add this import
 import os
 from dotenv import load_dotenv
 from typing import List, Dict, Any
+import logging
+
 
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
 
 async def send_security_alert(recipient_email: str, subject: str, findings: List[Dict[str, Any]], report_id: str):
     """Send security alert email with improved deliverability"""
@@ -18,7 +23,7 @@ async def send_security_alert(recipient_email: str, subject: str, findings: List
     smtp_user = os.getenv("SMTP_USER")
     smtp_password = os.getenv("SMTP_PASSWORD")
     email_from = os.getenv("EMAIL_FROM")
-    base_url = os.getenv("BASE_URL", "http://localhost:8000")
+    base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
     
     # Create message with proper headers
     message = MIMEMultipart("alternative")
@@ -79,7 +84,7 @@ async def send_no_findings_alert(recipient_email: str, repo_name: str, report_id
     smtp_user = os.getenv("SMTP_USER")
     smtp_password = os.getenv("SMTP_PASSWORD")
     email_from = os.getenv("EMAIL_FROM", smtp_user)
-    base_url = os.getenv("BASE_URL", "http://localhost:8000")
+    base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
     
     # Create message
     message = MIMEMultipart("alternative")
@@ -333,3 +338,67 @@ def get_severity_color(confidence: float) -> str:
     else:
         return "#ffc107"  # Yellow - Low
     
+async def send_scan_notification(recipient_email: str, repo_name: str, success: bool, findings_count: int):
+    """Send scan completion notification"""
+    smtp_server = os.getenv("SMTP_SERVER")
+    smtp_port = int(os.getenv("SMTP_PORT", 587))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    email_from = os.getenv("EMAIL_FROM", smtp_user)
+    
+    # Create message
+    message = MIMEMultipart("alternative")
+    subject = f"✅ Scan Complete: {repo_name}" if success else f"❌ Scan Failed: {repo_name}"
+    message["Subject"] = subject
+    message["From"] = email_from
+    message["To"] = recipient_email
+    
+    # Create content
+    if success:
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <body>
+            <h2>Scan Completed Successfully</h2>
+            <p>Repository: <strong>{repo_name}</strong></p>
+            <p>Findings detected: <strong>{findings_count}</strong></p>
+            <p>You can view detailed results in your SecretGuardian dashboard.</p>
+        </body>
+        </html>
+        """
+        text_content = f"Scan completed for {repo_name}\nFindings: {findings_count}"
+    else:
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <body>
+            <h2>Scan Failed</h2>
+            <p>Repository: <strong>{repo_name}</strong></p>
+            <p>The scan encountered an error. Please try again or contact support.</p>
+        </body>
+        </html>
+        """
+        text_content = f"Scan failed for {repo_name}"
+    
+    # Add both versions to message
+    message.attach(MIMEText(text_content, "plain"))
+    message.attach(MIMEText(html_content, "html"))
+    
+    try:
+        # Create SSL context
+        context = ssl.create_default_context()
+        
+        # Send email
+        await aiosmtplib.send(
+            message,
+            hostname=smtp_server,
+            port=smtp_port,
+            username=smtp_user,
+            password=smtp_password,
+            start_tls=True,
+            tls_context=context
+        )
+        logger.info(f"Scan notification sent to {recipient_email}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send scan notification: {e}")
