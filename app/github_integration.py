@@ -1,405 +1,434 @@
-import aiosmtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.header import Header  # Add this import
-import os
+import hashlib
+import hmac
+import json
+from fastapi import Request, HTTPException
+from typing import Dict, Any, List
+from bson import ObjectId
+from datetime import datetime
 from dotenv import load_dotenv
-from typing import List, Dict, Any
+import httpx
+import base64
 import logging
-
-
-
+import asyncio
+from . import detector, crud, email_service, database
 
 load_dotenv()
-
 logger = logging.getLogger(__name__)
 
-
-async def send_security_alert(recipient_email: str, subject: str, findings: List[Dict[str, Any]], report_id: str):
-    """Send security alert email with improved deliverability"""
-    # Configuration
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", 587))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    email_from = os.getenv("EMAIL_FROM")
-    base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
-    
-    # Create message with proper headers
-    message = MIMEMultipart("alternative")
-    
-    # Properly formatted sender address
-    # ✅ This works with Zoho
-    message["From"] = smtp_user
-    message["To"] = recipient_email
-    
-    # Non-alarming subject line
-    message["Subject"] = Header(f"Security Report for Your Repository - Action Required", "utf-8")
-    
-    # Important headers to prevent spam classification
-    message["X-Mailer"] = "SecretGuardian/1.0"
-    message["X-Priority"] = "1"  # Highest priority
-    message["X-MSMail-Priority"] = "High"
-    message["Importance"] = "High"
-    message["Precedence"] = "bulk"
-    message["Auto-Submitted"] = "auto-generated"
-    message["List-Unsubscribe"] = f"<mailto:support@secretguardian.com?subject=Unsubscribe>"
-    
-    # Create report URL
-    report_url = f"{base_url}/reports/{report_id}"
-    
-    # Create email content
-    html_content = create_security_alert_html(findings, report_id, report_url)
-    text_content = create_security_alert_text(findings, report_url)
-    
-    # Add both versions to message
-    message.attach(MIMEText(text_content, "plain"))
-    message.attach(MIMEText(html_content, "html"))
-    
+async def handle_webhook(request: Request) -> Dict[str, Any]:
+    """Simplified and reliable webhook handling"""
     try:
-        # Create SSL context
-        context = ssl.create_default_context()
+        # Verify webhook signature
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        webhook_secret = os.getenv("GITHUB_WEBHOOK_SECRET")
         
-        # Send email using Zoho's SMTP
-        await aiosmtplib.send(
-            message,
-            hostname=smtp_server,
-            port=smtp_port,
-            username=smtp_user,
-            password=smtp_password,
-            start_tls=True,
-            tls_context=context
-        )
-        print(f"Security alert sent to {recipient_email}")
-        
-    except Exception as e:
-        print(f"Failed to send email: {e}")
-        print(f"SMTP details: {smtp_server}:{smtp_port}, user: {smtp_user}")
-        
-# Add this function to email_service.py
-async def send_no_findings_alert(recipient_email: str, repo_name: str, report_id: str):
-    """Send email notification when no findings are detected"""
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", 587))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    email_from = os.getenv("EMAIL_FROM", smtp_user)
-    base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
-    
-    # Create message
-    message = MIMEMultipart("alternative")
-    message["Subject"] = f"✅ Security Scan Complete: {repo_name}"
-    message["From"] = email_from
-    message["To"] = recipient_email
-    
-    # Create report URL
-    report_url = f"{base_url}/reports/{report_id}"
-    
-    # Create HTML content
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>SecretGuardian Security Scan</title>
-    </head>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); padding: 30px; text-align: center; color: white; border-radius: 10px 10px 0 0;">
-                <h1 style="margin: 0; font-size: 28px;">✅ SecretGuardian</h1>
-                <p style="margin: 10px 0 0 0; font-size: 16px;">Security Scan Complete - No Issues Found</p>
-            </div>
+        if webhook_secret:
+            body = await request.body()
+            digest = hmac.new(
+                webhook_secret.encode(),
+                body,
+                hashlib.sha256
+            ).hexdigest()
             
-            <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-                <div style="background: #d4edda; border: 1px solid #c3e6cb; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-                    <h3 style="color: #155724; margin: 0 0 10px 0;">✅ Security Scan Successful</h3>
-                    <p style="margin: 0; color: #155724;">We scanned <strong>{repo_name}</strong> and found no exposed secrets!</p>
-                </div>
-                
-                <p>Great job maintaining secure coding practices! Here's what we did:</p>
-                <ul>
-                    <li>Scanned all files in the repository</li>
-                    <li>Checked for over 15 types of sensitive data patterns</li>
-                    <li>Analyzed high-entropy strings that could be secrets</li>
-                </ul>
-                
-                <div style="text-align: center; margin-top: 30px;">
-                    <a href="{report_url}" style="background: #4CAF50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">View Full Report</a>
-                </div>
-                
-                <hr style="margin: 30px 0; border: none; border-top: 1px solid #dee2e6;">
-                
-                <div style="text-align: center; color: #6c757d; font-size: 14px;">
-                    <p>This alert was generated by SecretGuardian - your automated security scanning service.</p>
-                    <p>Report ID: {report_id}</p>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
-    # Create plain text version
-    text_content = f"""
-    ✅ SECRETGUARDIAN SECURITY SCAN COMPLETE ✅
-    
-    We scanned {repo_name} and found no exposed secrets!
-    
-    Great job maintaining secure coding practices! 
-    
-    View full report: {report_url}
-    
-    This alert was generated by SecretGuardian - your automated security scanning service.
-    Report ID: {report_id}
-    """
-    
-    # Add both versions to message
-    part1 = MIMEText(text_content, "plain")
-    part2 = MIMEText(html_content, "html")
-    
-    message.attach(part1)
-    message.attach(part2)
-    
-    try:
-        # Create SSL context
-        context = ssl.create_default_context()
+            if not hmac.compare_digest(signature, f"sha256={digest}"):
+                raise HTTPException(status_code=403, detail="Invalid signature")
         
-        # Send email
-        await aiosmtplib.send(
-            message,
-            hostname=smtp_server,
-            port=smtp_port,
-            username=smtp_user,
-            password=smtp_password,
-            start_tls=True,
-            tls_context=context
-        )
-        print(f"No-findings alert sent to {recipient_email}")
-        
-    except Exception as e:
-        print(f"Failed to send no-findings email: {e}")
+        # Get event type
+        event_type = request.headers.get("X-GitHub-Event")
+        payload = await request.json()
 
-def create_security_alert_html(findings: List[Dict[str, Any]], report_id: str, report_url: str) -> str:
-    """Create HTML email content for security alert"""
+        # Handle repository creation
+        if event_type == "repository" and payload.get("action") in ["created", "publicized"]:
+            return await handle_repo_created(payload)
+
+        # Handle push events
+        elif event_type == "push":
+            return await handle_push_event(payload)
+
+        return {"message": f"Event type '{event_type}' not handled"}
+
+    except Exception as e:
+        logger.error(f"Webhook error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Webhook processing failed")
+    # Add case for repository deletion
+    if event_type == "repository" and action == "deleted":
+        return await handle_repo_deleted(payload)
     
-    findings_html = ""
-    for i, finding in enumerate(findings, 1):
-        severity_color = get_severity_color(finding.get('confidence', 0))
+async def handle_repo_deleted(payload: Dict[str, Any]):
+    """Handle repository deletion event"""
+    try:
+        repository = payload.get("repository", {})
+        repo_name = repository.get("full_name", "unknown")
         
-        findings_html += f"""
-        <div style="border-left: 4px solid {severity_color}; padding-left: 15px; margin: 15px 0;">
-            <h4 style="color: {severity_color}; margin: 0;">Finding #{i}: {finding.get('type', 'Unknown')}</h4>
-            <p><strong>Location:</strong> {finding.get('location', 'N/A')}</p>
-            <p><strong>Line:</strong> {finding.get('line', 'N/A')}</p>
-            <p><strong>Confidence:</strong> {finding.get('confidence', 0):.2%}</p>
-            <p><strong>Context:</strong> <code>{finding.get('context', '')}</code></p>
-            <p><strong>Recommendation:</strong> {finding.get('recommendation', 'Review and remove this secret')}</p>
-        </div>
-        """
+        db = await database.get_database()
+        result = await db.repositories.delete_one(
+            {"repository_name": repo_name}
+        )
+        
+        # Automatically stop any scheduled scans
+        # (Implementation depends on your scheduler)
+        
+        return {"status": "repository removed", "deleted_count": result.deleted_count}
+    except Exception as e:
+        logger.error(f"Error deleting repository: {e}")
+        return {"status": "error", "error": str(e)}
+
+async def handle_repo_created(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Direct repository scanning without queues"""
+    try:
+        repository = payload.get("repository", {})
+        sender = payload.get("sender", {})
+        
+        repo_name = repository.get("full_name", "unknown")
+        repo_url = repository.get("html_url", "")
+        owner = sender.get("login", "unknown")
+        user_email = sender.get("email", f"{owner}@users.noreply.github.com")
+        
+        # Add repository to database
+        db = await database.get_database()
+        repo_data = {
+            "user_email": user_email,
+            "repository_name": repo_name,
+            "repository_url": repo_url,
+            "is_monitored": True,
+            "added_at": datetime.utcnow(),
+            "last_scan": None,
+            "findings_count": 0,
+            "scan_status": "scanning"
+        }
+        
+        result = await db.repositories.insert_one(repo_data)
+        repo_id = str(result.inserted_id)
+        
+        # Perform scan immediately
+        access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+        if not access_token:
+            logger.error("GitHub access token not configured")
+            return {"status": "error", "error": "GitHub access token missing"}
+        
+        asyncio.create_task(scan_and_notify(repo_id, user_email, access_token, repo_name))
+        
+        return {"status": "repository added and scan started", "repo_id": repo_id}
+    except Exception as e:
+        logger.error(f"Error adding repository: {e}")
+        return {"status": "error", "error": str(e)}
     
-    html_template = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>SecretGuardian Security Alert</title>
-    </head>
-    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; color: white; border-radius: 10px 10px 0 0;">
-                <h1 style="margin: 0; font-size: 28px;">🛡️ SecretGuardian</h1>
-                <p style="margin: 10px 0 0 0; font-size: 16px;">Security Alert - Secrets Detected</p>
-            </div>
+async def scan_worker():
+    """Background worker to process scan queue"""
+    while True:
+        try:
+            task = await scan_queue.get()
+            repo_id = task["repo_id"]
+            user_email = task["user_email"]
+            installation_id = task["installation_id"]
             
-            <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 10px 10px;">
-                <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
-                    <h3 style="color: #856404; margin: 0 0 10px 0;">⚠️ Security Issue Detected</h3>
-                    <p style="margin: 0; color: #856404;">We found <strong>{len(findings)} potential secret(s)</strong> in your repository that require immediate attention.</p>
-                </div>
-                
-                <h3 style="color: #333; margin-bottom: 20px;">📋 Findings Details:</h3>
-                {findings_html}
-                
-                <div style="background: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; border-radius: 5px; margin-top: 20px;">
-                    <h4 style="color: #0c5460; margin: 0 0 10px 0;">🔒 Security Recommendations:</h4>
-                    <ul style="color: #0c5460; margin: 0; padding-left: 20px;">
-                        <li>Remove all detected secrets from your code immediately</li>
-                        <li>Rotate any compromised credentials</li>
-                        <li>Use environment variables or secure secret management systems</li>
-                        <li>Review your commit history for additional exposures</li>
-                        <li>Consider using .gitignore for sensitive files</li>
-                    </ul>
-                </div>
-                
-                <div style="text-align: center; margin-top: 30px;">
-                    <a href="{report_url}" style="background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">View Full Report</a>
-                </div>
-                
-                <hr style="margin: 30px 0; border: none; border-top: 1px solid #dee2e6;">
-                
-                <div style="text-align: center; color: #6c757d; font-size: 14px;">
-                    <p>This alert was generated by SecretGuardian - your automated security scanning service.</p>
-                    <p>Report ID: {report_id}</p>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+            # Get installation token
+            access_token = await get_installation_token(installation_id)
+            if not access_token:
+                access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+            
+            # Perform scan
+            await scan_repository(repo_id, user_email, access_token)
+            
+        except Exception as e:
+            logger.error(f"Scan worker error: {e}")
+        finally:
+            scan_queue.task_done()   
     
-    # Add these elements to reduce spam score:
-    html_template += """
-    <div style="display:none; font-size:0; line-height:0;">
-        This is a security alert from SecretGuardian. You're receiving this because 
-        you have repositories monitored by our security scanning service.
-    </div>
-    <p style="font-size:12px; color:#6c757d;">
-        This email was sent to ${recipient_email} because you have security scanning 
-        enabled for your repositories. If you believe this was sent in error, 
-        please contact support.
-    </p>
-    """
-    
-    # Add these elements to reduce spam score:
-    html_template += """
-    <!-- Anti-spam text -->
-    <div style="display:none; font-size:0; line-height:0;">
-        This is an automated security report from SecretGuardian. 
-        You're receiving this because you have repositories monitored by our service.
-        SecretGuardian helps you find and fix exposed secrets in your code.
-    </div>
-    
-    <!-- Professional signature -->
-    <div style="border-top:1px solid #eee; margin-top:30px; padding-top:15px;">
-        <p>Best regards,<br>The SecretGuardian Security Team</p>
-        <p style="font-size:12px; color:#777;">
-            This is an automated message. Please do not reply directly to this email.
-            Contact support@secretguardian.com for assistance.
-        </p>
-    </div>
-    
-    <!-- Physical address for compliance -->
-    <p style="font-size:10px; color:#999; margin-top:20px;">
-        SecretGuardian Inc.<br>
-        123 Security Lane, San Francisco, CA 94107<br>
-        Unsubscribe: <a href="%unsubscribe_url%">Manage Preferences</a>
-    </p>
-    """
-    
-    return html_template
-
-def create_security_alert_text(findings: List[Dict[str, Any]], report_url: str) -> str:
-    """Create plain text email content for security alert"""
-    
-    content = f"""
-🛡️ SECRETGUARDIAN SECURITY ALERT 🛡️
-
-⚠️  SECURITY ISSUE DETECTED ⚠️
-
-We found {len(findings)} potential secret(s) in your repository that require immediate attention.
-
-FINDINGS DETAILS:
-{'='*50}
-"""
-    
-    for i, finding in enumerate(findings, 1):
-        content += f"""
-Finding #{i}: {finding.get('type', 'Unknown')}
-Location: {finding.get('location', 'N/A')}
-Line: {finding.get('line', 'N/A')}
-Confidence: {finding.get('confidence', 0):.2%}
-Context: {finding.get('context', '')}
-Recommendation: {finding.get('recommendation', 'Review and remove this secret')}
-
-{'-'*40}
-"""
-    
-    content += f"""
-🔒 SECURITY RECOMMENDATIONS:
-• Remove all detected secrets from your code immediately
-• Rotate any compromised credentials  
-• Use environment variables or secure secret management systems
-• Review your commit history for additional exposures
-• Consider using .gitignore for sensitive files
-
-View full report: {report_url}
-
-This alert was generated by SecretGuardian - your automated security scanning service.
-"""
-    
-    return content
-
-def get_severity_color(confidence: float) -> str:
-    """Get color based on confidence/severity"""
-    if confidence >= 0.8:
-        return "#dc3545"  # Red - High
-    elif confidence >= 0.6:
-        return "#fd7e14"  # Orange - Medium  
-    else:
-        return "#ffc107"  # Yellow - Low
-    
-async def send_scan_notification(recipient_email: str, repo_name: str, success: bool, findings_count: int):
-    """Send scan completion notification"""
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", 587))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    email_from = os.getenv("EMAIL_FROM", smtp_user)
-    
-    # Create message
-    message = MIMEMultipart("alternative")
-    subject = f"✅ Scan Complete: {repo_name}" if success else f"❌ Scan Failed: {repo_name}"
-    message["Subject"] = subject
-    message["From"] = smtp_user
-    message["To"] = recipient_email
-    
-    # Create content
-    if success:
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <body>
-            <h2>Scan Completed Successfully</h2>
-            <p>Repository: <strong>{repo_name}</strong></p>
-            <p>Findings detected: <strong>{findings_count}</strong></p>
-            <p>You can view detailed results in your SecretGuardian dashboard.</p>
-        </body>
-        </html>
-        """
-        text_content = f"Scan completed for {repo_name}\nFindings: {findings_count}"
-    else:
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <body>
-            <h2>Scan Failed</h2>
-            <p>Repository: <strong>{repo_name}</strong></p>
-            <p>The scan encountered an error. Please try again or contact support.</p>
-        </body>
-        </html>
-        """
-        text_content = f"Scan failed for {repo_name}"
-    
-    # Add both versions to message
-    message.attach(MIMEText(text_content, "plain"))
-    message.attach(MIMEText(html_content, "html"))
-    
-    try:
-        # Create SSL context
-        context = ssl.create_default_context()
+async def get_installation_token(installation_id: int) -> str:
+    """Get installation access token for better permissions"""
+    if not installation_id:
+        return None
         
-        # Send email
-        await aiosmtplib.send(
-            message,
-            hostname=smtp_server,
-            port=smtp_port,
-            username=smtp_user,
-            password=smtp_password,
-            start_tls=True,
-            tls_context=context
-        )
-        logger.info(f"Scan notification sent to {recipient_email}")
+    try:
+        jwt_token = generate_jwt_token()
+        if not jwt_token:
+            return None
+            
+        headers = {
+            "Authorization": f"Bearer {jwt_token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers)
+            if response.status_code == 201:
+                token_data = response.json()
+                return token_data.get("token")
+            else:
+                logger.error(f"Failed to get installation token: {response.status_code} {response.text}")
+    except Exception as e:
+        logger.error(f"Error getting installation token: {e}")
+    return None
+
+
+def generate_jwt_token() -> str:
+    """Generate JWT token for GitHub App authentication"""
+    try:
+        # Load GitHub App credentials
+        app_id = os.getenv("GITHUB_APP_ID")
+        private_key = os.getenv("GITHUB_APP_PRIVATE_KEY")
+        
+        if not app_id or not private_key:
+            logger.error("GitHub App credentials not configured")
+            return None
+            
+        # Generate JWT token
+        from jwt import encode
+        from time import time
+        
+        payload = {
+            "iat": int(time()),
+            "exp": int(time()) + 600,  # 10 minutes expiration
+            "iss": app_id
+        }
+        
+        return encode(payload, private_key, algorithm="RS256")
         
     except Exception as e:
-        logger.error(f"Failed to send scan notification: {e}")
+        logger.error(f"Error generating JWT token: {e}")
+        return None
+
+
+# Start scan worker on application startup
+async def start_scan_worker():
+    asyncio.create_task(scan_worker())
+
+async def scan_and_notify(repo_id: str, user_email: str, access_token: str, repo_name: str):
+    """Unified scanning and notification function"""
+    db = await database.get_database()
+    try:
+        # Update status to scanning
+        await db.repositories.update_one(
+            {"_id": ObjectId(repo_id)},
+            {"$set": {"scan_status": "scanning"}}
+        )
+        
+        # Perform the scan
+        scan_success, findings_count = await scan_repository(repo_id, user_email, access_token)
+        
+        # Update status and send notification
+        if scan_success:
+            await db.repositories.update_one(
+                {"_id": ObjectId(repo_id)},
+                {"$set": {
+                    "scan_status": "completed",
+                    "findings_count": findings_count
+                }}
+            )
+            # Send notification email
+            await email_service.send_scan_notification(
+                user_email,
+                repo_name,
+                True,
+                findings_count
+            )
+        else:
+            await db.repositories.update_one(
+                {"_id": ObjectId(repo_id)},
+                {"$set": {"scan_status": "failed"}}
+            )
+            # Send failure email
+            await email_service.send_scan_notification(
+                user_email,
+                repo_name,
+                False,
+                0
+            )
+            
+    except Exception as e:
+        logger.error(f"Scan and notify error: {e}")
+        await db.repositories.update_one(
+            {"_id": ObjectId(repo_id)},
+            {"$set": {"scan_status": "failed"}}
+        )
+
+
+async def scan_repository(repo_id: str, user_email: str, access_token: str) -> (bool, int):
+    """Simplified scanning function returns success and findings count"""
+    try:
+        db = await database.get_database()
+        repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
+        if not repo:
+            return False, 0
+            
+        repo_url = repo["repository_url"]
+        if "github.com" not in repo_url:
+            return False, 0
+            
+        parts = repo_url.split("github.com/")[1].split("/")
+        if len(parts) < 2:
+            return False, 0
+            
+        owner = parts[0]
+        repo_name = parts[1]
+        
+        # Get default branch
+        headers = {"Authorization": f"Bearer {access_token}"}
+        repo_info_url = f"https://api.github.com/repos/{owner}/{repo_name}"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(repo_info_url, headers=headers)
+            if response.status_code != 200:
+                return False, 0
+            repo_info = response.json()
+            default_branch = repo_info.get("default_branch", "main")
+        
+        # Get repository tree
+        tree_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/trees/{default_branch}?recursive=1"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(tree_url, headers=headers)
+            if response.status_code != 200:
+                return False, 0
+            tree_data = response.json()
+        
+        # Scan all files
+        all_findings = []
+        for item in tree_data.get("tree", []):
+            if item["type"] != "blob" or item["size"] <= 0:
+                continue
+                
+            file_path = item["path"]
+            if any(file_path.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bin', '.zip']):
+                continue
+                
+            file_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{file_path}?ref={default_branch}"
+            async with httpx.AsyncClient() as client:
+                response = await client.get(file_url, headers=headers)
+                if response.status_code != 200:
+                    continue
+                
+                file_data = response.json()
+                if "content" not in file_data:
+                    continue
+                
+                try:
+                    content = base64.b64decode(file_data["content"]).decode("utf-8")
+                    findings = detector.scan_text(content)
+                    for finding in findings:
+                        finding["location"] = f"File: {file_path}"
+                        all_findings.append(finding)
+                except Exception:
+                    continue
+        
+        # Create report
+        report = await crud.create_report(
+            user_email=user_email,
+            repository_name=repo["repository_name"],
+            findings=all_findings,
+            scan_type="automatic"
+        )
+        
+        # Update last scan time
+        await db.repositories.update_one(
+            {"_id": ObjectId(repo_id)},
+            {"$set": {"last_scan": datetime.utcnow()}}
+        )
+        
+        # Send security alert
+        if all_findings:
+            await email_service.send_security_alert(
+                user_email,
+                f"Security Alert for {repo['repository_name']}",
+                all_findings,
+                str(report["_id"])
+                
+            )
+        else:
+            await email_service.send_no_findings_alert(
+                user_email,
+                repo["repository_name"],
+                str(report["_id"])
+                
+            )
+        
+        return True, len(all_findings)
+        
+    except Exception as e:
+        logger.error(f"Repository scan error: {e}")
+        return False, 0
+
+
+async def handle_push_event(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Trigger scan on push events"""
+    repository = payload.get("repository", {})
+    sender = payload.get("sender", {})
+    
+    repo_name = repository.get("full_name", "unknown")
+    owner = repository.get("owner", {}).get("login", "unknown")
+    user_email = sender.get("email", f"{owner}@users.noreply.github.com")
+    
+    # Find repository in database
+    db = await database.get_database()
+    repo = await db.repositories.find_one({
+        "repository_name": repo_name,
+        "user_email": user_email,
+        "is_monitored": True
+    })
+    
+    if not repo:
+        return {"message": "Repository not monitored"}
+    
+    # Trigger scan
+    access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+    if not access_token:
+        return {"message": "GitHub access token missing"}
+    
+    asyncio.create_task(scan_and_notify(str(repo["_id"]), user_email, access_token, repo_name))
+    
+    return {"message": "Scan triggered for repository"}
+
+async def scan_commit(commit: Dict[str, Any], repo_name: str, owner: str) -> list:
+    """Scan a single commit for secrets"""
+    findings = []
+    
+    # Get commit details
+    commit_id = commit.get("id", "")
+    commit_message = commit.get("message", "")
+    added_files = commit.get("added", [])
+    modified_files = commit.get("modified", [])
+    removed_files = commit.get("removed", [])
+    
+    # Scan commit message
+    message_findings = detector.scan_text(commit_message)
+    for finding in message_findings:
+        finding["location"] = f"Commit message: {commit_id[:8]}"
+        findings.append(finding)
+    
+    # Scan files using GitHub API
+    access_token = os.getenv("GITHUB_ACCESS_TOKEN", os.getenv("GITHUB_CLIENT_SECRET"))
+    headers = {
+        "Authorization": f"token {access_token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    all_files = added_files + modified_files
+    for file_path in all_files:
+        try:
+            # Skip binary files
+            if any(ext in file_path for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bin']):
+                continue
+                
+            # Fetch file content
+            file_url = f"https://api.github.com/repos/{repo_name}/contents/{file_path}?ref={commit_id}"
+            async with httpx.AsyncClient() as client:
+                response = await client.get(file_url, headers=headers)
+                if response.status_code != 200:
+                    continue
+                    
+                file_data = response.json()
+                if "content" not in file_data:
+                    continue
+                    
+                # Decode content
+                content = base64.b64decode(file_data["content"]).decode("utf-8")
+                
+                # Scan content
+                content_findings = detector.scan_text(content)
+                for finding in content_findings:
+                    finding["location"] = f"File: {file_path}"
+                    findings.append(finding)
+        except Exception as e:
+            print(f"Error scanning file {file_path}: {str(e)}")
+    
+    return findings
