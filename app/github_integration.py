@@ -40,8 +40,10 @@ async def handle_webhook(request: Request) -> Dict[str, Any]:
         # Handle repository events
         if event_type == "repository":
             action = payload.get("action")
-            if action in ["created", "publicized", "added"]:
+            if action in ["created", "publicized"]:
                 return await handle_repo_created(payload)
+            elif action == "deleted":
+                return await handle_repo_deleted(payload)
 
         # Handle push events
         elif event_type == "push":
@@ -85,6 +87,7 @@ async def handle_repo_created(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         repository = payload.get("repository", {})
         sender = payload.get("sender", {})
+        installation = payload.get("installation", {})
         
         repo_name = repository.get("full_name", "unknown")
         repo_url = repository.get("html_url", "")
@@ -106,15 +109,19 @@ async def handle_repo_created(payload: Dict[str, Any]) -> Dict[str, Any]:
         result = await db.repositories.insert_one(repo_data)
         repo_id = str(result.inserted_id)
         
+        # Get installation access token
+        access_token = await get_installation_token(installation.get("id"))
+        if not access_token:
+            access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+        
         # Trigger immediate scan
-        access_token = os.getenv("GITHUB_ACCESS_TOKEN")
         await scan_repository(repo_id, user_email, access_token)
         
         return {"status": "repository added and scanned", "repo_id": repo_id}
     except Exception as e:
         logger.error(f"Error adding repository: {e}")
         return {"status": "error", "error": str(e)}
-
+    
 async def get_installation_token(installation_id: int) -> str:
     """Get installation access token for better permissions"""
     if not installation_id:
@@ -137,10 +144,34 @@ async def get_installation_token(installation_id: int) -> str:
         logger.error(f"Error getting installation token: {e}")
     return None
 
+
+
 def generate_jwt_token() -> str:
     """Generate JWT token for GitHub App authentication"""
-    # Requires additional setup - see next section
-    return os.getenv("GITHUB_ACCESS_TOKEN")  # Fallback
+    try:
+        # Load GitHub App credentials
+        app_id = os.getenv("GITHUB_APP_ID")
+        private_key = os.getenv("GITHUB_APP_PRIVATE_KEY")
+        
+        if not app_id or not private_key:
+            logger.error("GitHub App credentials not configured")
+            return None
+            
+        # Generate JWT token
+        from jwt import encode
+        from time import time
+        
+        payload = {
+            "iat": int(time()),
+            "exp": int(time()) + 600,  # 10 minutes expiration
+            "iss": app_id
+        }
+        
+        return encode(payload, private_key, algorithm="RS256")
+        
+    except Exception as e:
+        logger.error(f"Error generating JWT token: {e}")
+        return None
 
 async def scan_repository(repo_id: str, user_email: str, access_token: str):
     """Scan a repository using GitHub token"""
@@ -267,8 +298,6 @@ async def handle_push_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     repo_url = repository.get("html_url", "")
     owner = repository.get("owner", {}).get("login", "unknown")
     
-    all_findings = []
-    
     # Get user email
     user_email = sender.get("email", "")
     if not user_email:
@@ -278,36 +307,27 @@ async def handle_push_event(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not user_email:
         user_email = f"{owner}@users.noreply.github.com"
     
-    # Scan each commit
-    for commit in commits:
-        commit_findings = await scan_commit(commit, repo_name, owner)
-        all_findings.extend(commit_findings)
+    # Check if this repository is monitored
+    db = await database.get_database()
+    repo = await db.repositories.find_one({
+        "repository_name": repo_name,
+        "user_email": user_email,
+        "is_monitored": True
+    })
     
-    # If secrets found, create report and send alert
-    if all_findings:
-        # Create security report
-        report = await crud.create_report(
-            user_email=user_email,
-            repository_name=repo_name,
-            findings=all_findings,
-            scan_type="webhook"
-        )
-        
-        # Send email notification
-        await email_service.send_security_alert(
-            user_email,
-            f"Secrets detected in {repo_name}",
-            all_findings,
-            str(report["_id"])
-        )
-        
-        return {
-            "message": "Secrets detected and alert sent",
-            "findings_count": len(all_findings),
-            "report_id": str(report["_id"])
-        }
+    if not repo:
+        return {"message": "Repository not monitored"}
     
-    return {"message": "No secrets detected"}
+    # Get installation access token
+    installation = payload.get("installation", {})
+    access_token = await get_installation_token(installation.get("id"))
+    if not access_token:
+        access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+    
+    # Trigger full repository scan
+    await scan_repository(str(repo["_id"]), user_email, access_token)
+    
+    return {"message": "Scan triggered for repository"}
 
 async def scan_commit(commit: Dict[str, Any], repo_name: str, owner: str) -> list:
     """Scan a single commit for secrets"""
