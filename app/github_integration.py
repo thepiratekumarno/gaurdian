@@ -1,22 +1,26 @@
 import hashlib
 import hmac
 import json
-from fastapi import Request, HTTPException
-from typing import Dict, Any
 import os
-from . import detector, crud, email_service, database
+import asyncio
+from fastapi import Request, HTTPException
+from typing import Dict, Any, List
 from bson import ObjectId
 from datetime import datetime
 from dotenv import load_dotenv
 import httpx
 import base64
 import logging
+from . import detector, crud, email_service, database
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+# Improved webhook handling with async queue
+scan_queue = asyncio.Queue()
+
 async def handle_webhook(request: Request) -> Dict[str, Any]:
-    """Handle GitHub webhook events"""
+    """Handle GitHub webhook events with improved reliability"""
     try:
         # Verify webhook signature
         signature = request.headers.get("X-Hub-Signature-256", "")
@@ -40,7 +44,7 @@ async def handle_webhook(request: Request) -> Dict[str, Any]:
         # Handle repository events
         if event_type == "repository":
             action = payload.get("action")
-            if action in ["created", "publicized"]:
+            if action in ["created", "publicized", "added"]:
                 return await handle_repo_created(payload)
             elif action == "deleted":
                 return await handle_repo_deleted(payload)
@@ -57,8 +61,8 @@ async def handle_webhook(request: Request) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
-       
         raise HTTPException(status_code=500, detail="Webhook processing failed")
+
     # Add case for repository deletion
     if event_type == "repository" and action == "deleted":
         return await handle_repo_deleted(payload)
@@ -103,24 +107,46 @@ async def handle_repo_created(payload: Dict[str, Any]) -> Dict[str, Any]:
             "is_monitored": True,
             "added_at": datetime.utcnow(),
             "last_scan": None,
-            "findings_count": 0
+            "findings_count": 0,
+            "scan_status": "queued"
         }
         
         result = await db.repositories.insert_one(repo_data)
         repo_id = str(result.inserted_id)
         
-        # Get installation access token
-        access_token = await get_installation_token(installation.get("id"))
-        if not access_token:
-            access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+        # Queue for scanning
+        await scan_queue.put({
+            "repo_id": repo_id,
+            "user_email": user_email,
+            "installation_id": installation.get("id")
+        })
         
-        # Trigger immediate scan
-        await scan_repository(repo_id, user_email, access_token)
-        
-        return {"status": "repository added and scanned", "repo_id": repo_id}
+        return {"status": "repository added to scan queue", "repo_id": repo_id}
     except Exception as e:
         logger.error(f"Error adding repository: {e}")
         return {"status": "error", "error": str(e)}
+    
+async def scan_worker():
+    """Background worker to process scan queue"""
+    while True:
+        try:
+            task = await scan_queue.get()
+            repo_id = task["repo_id"]
+            user_email = task["user_email"]
+            installation_id = task["installation_id"]
+            
+            # Get installation token
+            access_token = await get_installation_token(installation_id)
+            if not access_token:
+                access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+            
+            # Perform scan
+            await scan_repository(repo_id, user_email, access_token)
+            
+        except Exception as e:
+            logger.error(f"Scan worker error: {e}")
+        finally:
+            scan_queue.task_done()   
     
 async def get_installation_token(installation_id: int) -> str:
     """Get installation access token for better permissions"""
@@ -129,6 +155,9 @@ async def get_installation_token(installation_id: int) -> str:
         
     try:
         jwt_token = generate_jwt_token()
+        if not jwt_token:
+            return None
+            
         headers = {
             "Authorization": f"Bearer {jwt_token}",
             "Accept": "application/vnd.github.v3+json"
@@ -140,10 +169,11 @@ async def get_installation_token(installation_id: int) -> str:
             if response.status_code == 201:
                 token_data = response.json()
                 return token_data.get("token")
+            else:
+                logger.error(f"Failed to get installation token: {response.status_code} {response.text}")
     except Exception as e:
         logger.error(f"Error getting installation token: {e}")
     return None
-
 
 
 def generate_jwt_token() -> str:
@@ -172,6 +202,11 @@ def generate_jwt_token() -> str:
     except Exception as e:
         logger.error(f"Error generating JWT token: {e}")
         return None
+
+
+# Start scan worker on application startup
+async def start_scan_worker():
+    asyncio.create_task(scan_worker())
 
 async def scan_repository(repo_id: str, user_email: str, access_token: str):
     """Scan a repository using GitHub token"""
