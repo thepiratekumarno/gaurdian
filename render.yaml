@@ -14,77 +14,16 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: BASE_URL
-        value: https://secretguardian.onrender.com
-
-      - key: GITHUB_CLIENT_ID
-        value: Ov23liBnUMNmWoJ91sEB
-
-      - key: GITHUB_CLIENT_SECRET
-        value: 2aadb391b9f977ba73e0d7b0966f3c44cc614d49
-
-      - key: GITHUB_WEBHOOK_SECRET
-        value: 60e22797d1b2d499b2c55c8c675ccdd5e3bbd986
-
-      - key: GOOGLE_CLIENT_ID
-        value: 614110627327-fmnp42k386jrfr18skqh9cacof69rrna.apps.googleusercontent.com
-
-      - key: GOOGLE_CLIENT_SECRET
-        value: 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
-
-      - key: SMTP_SERVER
-        value: smtp.zoho.in
-
-      - key: SMTP_PORT
-        value: 587
-
-      - key: SMTP_USER
-        value: secretguardian@zohomail.in
-
-      - key: SMTP_PASSWORD
-        value: rP2xdnF5S7MA
-
-      - key: EMAIL_FROM
-        value: secretguardian@zohomail.in
-
+        value: https://your-app-name.onrender.com
       - key: GITHUB_APP_ID
-        value: 1716653
-
+        value: your_github_app_id
       - key: GITHUB_APP_PRIVATE_KEY
         value: |
           -----BEGIN RSA PRIVATE KEY-----
-          MIIEpAIBAAKCAQEAukLXETumD7dpirGmENMr0gcJv4mZ8ClA7VdK4arAJD8UWOGC
-          9q8/zdtD4dsfVqDGspfZMhCZD9mdygXvG1mskoUEYr0h85GRXdLdak8ZnW1zfblR
-          DUuCecHmAOlVzVNzN/Gayrjx2uO0bWK+EaPHUgDkR40ltkcsDUynvYFYsyO1ZUR9
-          bJFovHI9Xlxx5MBGLawlWfb10nj0FFvUK3Ljvxz3DVDImbF9UWPg/OngFJ1vfsw5
-          V5XLnweqW4ncnODlAML6KKj5Rq9RmWYOC3vY6AOMt5KZhB4owis7W74tpkOxN/gd
-          0lY3kQrBSuKp3Rp9fg34nQ+wJYD3VnGXN4ycywIDAQABAoIBABm6s/TIdZcEMgsb
-          oSH/2bTIjhssSdx4BmUCwvBLYwFeyVPByxKCgODR4h2n5DtWODxhZ3pX+pzK5dYL
-          Xc08ZO9UepedIrx/pkH8p+NQi+xIO0TpvX2Fqb9h/oCvus+DMI5QzJ4mUBp5i+n0
-          Uuci5Zy5TM9pewUj7bzkkuNFo9gS4RPGaZyC/X8z5v6vdQmkQGf4yXr7NlS0zUjO
-          /bpS9H/LECeBsvwkxzWy8YR9M79mIO07mFv+stesnAJcp1SUbakT/klPufzFOErr
-          pwHUvi+DoiGutBOs0fGv7kUslX+NV/D+nFhvCT1CWAsL8Jy5l7wQupEDoplMnncg
-          XPXKSrkCgYEA8PaVJwU8PGcwrYnCzXrgdJyXRLRBUhvJ+jPvBlQP7K3Y/lHrNOb5
-          0jEC/oQBliPggXxsSQ/8DOc0njlkROtsRHBrCDQf45N2drrvfbfJoMiDYiINwy+5
-          qwJYqxQx5Yj15ig86zTHx7E/aj4DfHaKrlZBn/cCDCcXSYXRBnz51z8CgYEAxeJi
-          YeL5m+mIwpKdcHbYfkgs9SCHeypWIIsox88qqzR0o68oFjvCSnzCEdqWVS2ROytk
-          Kd14zknlNfUNl+Jwk6BjDE029Q2mJbd4LXtgjVht4WuPIx8tKX668+ZN6O1ZWEzS
-          /4QYcUedREp9ZuYsmOZZmtrB85kWPMuZPSnIg3UCgYB4+8WNjvJcfY8SQq3dT4ms
-          4waMR1jYqf0yM6saaVCJjAv8PRM0P5hFMbiII61MPf015kvUL0NlExz3KGewtudo
-          QW1r9Afi0qJTIK6oV4PTx3k351Mzoh29v/LXCs+2qJqWEbPsgFaia9skM7i6YCZn
-          PAW9FF8hzOrDTn3RnSQwLwKBgQCmg/WdwU2h8UZv1Mg/FwLeYQXTz+exsNKA2Bkc
-          6itRnfZ4tq/Y5bh8zbbRJ0tRqeKIE99Zi1BY5r3GRcuGf7mTwGcYtvEEDNQ+8MBk
-          JWn+BuePxN7SAy4RuN7A1o/A7dk9AIidEx8uU8D28mfL6uykTVIhiOukfLHFvt3Y
-          Jgzg8QKBgQCvcXqzCQNj8KWO843kESDyI5qRmPkbpDsfzEoqtqKzNdlYLS/CRXMf
-          09rutTnVXTqYOpbcH6dV/jBWnvD2Vb0mN7sbn705oepGzu9IFE2H2rMbZuC+Ucr4
-          eQg/f/Vw5slWB7vYtKZQ1C9QC1Xv6Pq8q8J0E46+ZL40QK2kCwwijA==  
+          YOUR_PRIVATE_KEY_HERE
           -----END RSA PRIVATE KEY-----
-
-      - key: SCHEDULER_INTERVAL
-        value: "3600"
-
-      - key: AUTO_STOP_SCANS
-        value: "true"
+      # Add other environment variables here
+databases:
   - name: secretguardian-db
     databaseName: secretguardian_db
     user: secretguardian
-
