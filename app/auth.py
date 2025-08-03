@@ -6,6 +6,9 @@ from authlib.integrations.starlette_client import OAuth, OAuthError
 from dotenv import load_dotenv
 import httpx
 import traceback
+from datetime import datetime
+from . import database
+
 
 load_dotenv()
 
@@ -62,65 +65,57 @@ class OAuthManager:
             )
 
     async def github_callback(self, request: Request):
-        """Handle GitHub OAuth callback"""
+        #Handle GitHub OAuth callback - ENHANCED VERSION
         try:
-            # Verify state
-            query_state = request.query_params.get("state")
-            session_state = request.session.get("oauth_state")
-            
-            if not query_state or query_state != session_state:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid state parameter"
-                )
+            logger.info("GitHub callback received")
+        # Delegate to OAuth manager for token exchange and user info
+            user_info = await oauth_manager.github_callback(request)
+        # user_info dict contains: provider, id, username, email, name, avatar_url
 
-            # Get access token
-            token = await self.oauth.github.authorize_access_token(request)
-            if not token or 'access_token' not in token:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Failed to obtain access token"
-                )
+        # Store user info in session
+            request.session["user"] = user_info
 
-            # Get user info
-            resp = await self.oauth.github.get("user", token=token)
-            if resp.status_code != 200:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Failed to fetch user info"
+        # Retrieve the OAuth token stored by authlib
+            github_token = request.session.get("github_access_token")
+            if not github_token:
+                logger.warning("No GitHub access token found in session")
+            else:
+            # Persist token in database for background polling
+                db = await database.get_database()
+                await db.users.update_one(
+                    {"email": user_info["email"]},
+                    {
+                        "$set": {
+                            "github_access_token": github_token,
+                            "token_updated_at": datetime.utcnow()
+                        }
+                    },
+                    upsert=True
                 )
-            user_data = resp.json()
+                logger.info(f"Stored GitHub token for {user_info['email']}")
 
-            # Get email
-            email_resp = await self.oauth.github.get("user/emails", token=token)
-            emails = email_resp.json() if email_resp.status_code == 200 else []
-            primary_email = next(
-                (e["email"] for e in emails if e.get("primary")),
-                user_data.get("email")
+        # Create or update the user record
+            await crud.create_or_get_user(
+                email=user_info["email"],
+                username=user_info["username"],
+                full_name=user_info["name"] or user_info["username"],
+                provider=user_info["provider"],
+                provider_id=user_info["id"]
             )
-            
-            if not primary_email:
-                primary_email = f"{user_data['login']}@users.noreply.github.com"
+            logger.info(f"GitHub user successfully authenticated: {user_info['email']}")
 
-            # Store access token for repository access
-            request.session["github_access_token"] = token["access_token"]
-            
-            return {
-                "provider": "github",
-                "id": str(user_data["id"]),
-                "username": user_data["login"],
-                "email": primary_email,
-                "name": user_data.get("name") or user_data["login"],
-                "avatar_url": user_data.get("avatar_url")
-            }
+        # Redirect to dashboard
+            return RedirectResponse(url="/dashboard")
 
+        except HTTPException as e:
+            logger.error(f"GitHub auth error: {e.detail}")
+            return RedirectResponse(url="/?error=github_auth_failed")
+        except OAuthError as e:
+            logger.error(f"OAuth error during GitHub callback: {e.error}")
+            return RedirectResponse(url="/?error=github_auth_failed")
         except Exception as e:
-            logger.error(f"GitHub callback error: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise HTTPException(
-                status_code=500,
-                detail="GitHub authentication failed"
-            )
+            logger.error(f"Unhandled exception in GitHub callback: {e}", exc_info=True)
+            return RedirectResponse(url="/?error=github_auth_failed")
 
     async def google_login(self, request: Request):
         """Initiate Google login flow"""
