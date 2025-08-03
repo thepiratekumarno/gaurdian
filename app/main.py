@@ -1,4 +1,5 @@
-# main.py
+# main.py - Fixed version with email notifications for repository scans
+
 from fastapi import FastAPI, Request, Response, Depends, HTTPException, status, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -16,16 +17,13 @@ from datetime import datetime
 import json
 from bson import ObjectId
 import base64
-
-from fastapi import BackgroundTasks  # Add this import
+from fastapi import BackgroundTasks
 
 # Import oauth_manager
 from .auth import oauth_manager
 import asyncio
 from .github_integration import start_scan_worker
-
 from fastapi import WebSocket, WebSocketDisconnect
-
 from .github_integration import scan_and_notify
 from .filters import init_filters
 
@@ -61,13 +59,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Setup templates
 templates = Jinja2Templates(directory="templates")
+init_filters(templates.env)
 
 @app.on_event("startup")
 async def startup_event():
@@ -283,7 +280,6 @@ async def scan_code(request: Request, code: str = Form(...)):
             "error": "Failed to scan code"
         })
 
-# Update the reports_page function
 @app.get("/reports", response_class=HTMLResponse)
 async def reports_page(request: Request):
     """Display reports page - requires authentication"""
@@ -430,8 +426,14 @@ async def add_repository(request: Request, background_tasks: BackgroundTasks):
         repo_id = str(result.inserted_id)
         repo_data["_id"] = repo_id
         
-        # Trigger initial scan in background
-        background_tasks.add_task(scan_repository, request, repo_id, user["email"])
+        # FIXED: Use enhanced scanner that doesn't rely on session
+        access_token = request.session.get("github_access_token") or os.getenv("GITHUB_ACCESS_TOKEN")
+        background_tasks.add_task(
+            scan_repository_enhanced, 
+            repo_id, 
+            user["email"],
+            access_token
+        )
         
         repo_data["added_at"] = repo_data["added_at"].isoformat()
         
@@ -460,20 +462,20 @@ async def toggle_repository_monitoring(repo_id: str, request: Request, backgroun
         if result.modified_count == 0:
             raise HTTPException(status_code=404, detail="Repository not found")
         
-        # If enabling monitoring, trigger a scan
+        # If enabling monitoring, trigger a scan with enhanced scanner
         if is_monitored:
-            background_tasks.add_task(scan_repository, request, repo_id, user["email"])
+            access_token = request.session.get("github_access_token") or os.getenv("GITHUB_ACCESS_TOKEN")
+            background_tasks.add_task(
+                scan_repository_enhanced, 
+                repo_id, 
+                user["email"],
+                access_token
+            )
         
         return JSONResponse({"status": "success", "is_monitored": is_monitored})
     except Exception as e:
         logger.error(f"Toggle monitoring error: {e}")
         raise HTTPException(status_code=500, detail="Failed to update monitoring status")
-
-
-# Setup templates
-templates = Jinja2Templates(directory="templates")
-init_filters(templates.env)
-
 
 @app.get("/repositories/{repo_id}/scan")
 async def manual_scan_repository(repo_id: str, request: Request):
@@ -494,13 +496,12 @@ async def manual_scan_repository(repo_id: str, request: Request):
         if not access_token:
             return RedirectResponse(url="/repositories?error=no_token")
         
-        # Trigger scan
+        # Use enhanced scanner for manual scans too
         asyncio.create_task(
-            scan_and_notify(
+            scan_repository_enhanced(
                 repo_id,
                 user["email"],
-                access_token,
-                repo["repository_name"]
+                access_token
             )
         )
         
@@ -536,37 +537,7 @@ async def delete_repository(repo_id: str, request: Request):
         return JSONResponse({"status": "success", "message": "Repository deleted"})
     except Exception as e:
         logger.error(f"Delete repository error: {e}")
-   
         raise HTTPException(status_code=500, detail="Failed to delete repository")
-# Add this route for report details
-@app.get("/reports/{report_id}", response_class=HTMLResponse)
-async def report_detail(request: Request, report_id: str):
-    """Display report detail page"""
-    user = auth.get_current_user(request)
-    if not user:
-        return RedirectResponse(url="/")
-    
-    try:
-        db = await database.get_database()
-        report = await db.reports.find_one({"_id": ObjectId(report_id)})
-        
-        if not report or report["user_email"] != user["email"]:
-            raise HTTPException(status_code=404, detail="Report not found")
-        
-        # Convert ObjectId to string
-        report["_id"] = str(report["_id"])
-        return templates.TemplateResponse("report_detail.html", {
-            "request": request,
-            "user": user,
-            "report": report
-        })
-    except Exception as e:
-        logger.error(f"Report detail error: {e}")
-        return templates.TemplateResponse("404.html", {
-            "request": request,
-            "message": "Report not found"
-        }, status_code=404)
-        
 
 @app.delete("/api/reports/{report_id}")
 async def delete_report(report_id: str, request: Request):
@@ -590,29 +561,35 @@ async def delete_report(report_id: str, request: Request):
         logger.error(f"Delete report error: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete report")
 
-async def scan_repository(request: Request, repo_id: str, user_email: str):
-    """Scan a repository and generate report"""
+# FIXED: Enhanced repository scanner with email notifications
+async def scan_repository_enhanced(repo_id: str, user_email: str, access_token: str = None):
+    """Enhanced repository scanner that doesn't depend on request session and includes email notifications"""
     db = await database.get_database()
+    
     try:
         repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
         if not repo:
             logger.error(f"Repository not found: {repo_id}")
-            return
+            return False
             
-        # Get access token from session
-        access_token = request.session.get("github_access_token")
+        # Use provided access token or fall back to environment variable
         if not access_token:
-            logger.error("GitHub access token not available for scanning")
-            return
+            access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+        
+        if not access_token:
+            logger.error("No GitHub access token available for scanning")
+            return False
             
         # Extract owner and repo name
         repo_url = repo["repository_url"]
         if "github.com" not in repo_url:
-            return
+            logger.error(f"Not a GitHub repository: {repo_url}")
+            return False
             
         parts = repo_url.split("github.com/")[1].split("/")
         if len(parts) < 2:
-            return
+            logger.error(f"Invalid GitHub URL format: {repo_url}")
+            return False
             
         owner = parts[0]
         repo_name = parts[1]
@@ -622,11 +599,13 @@ async def scan_repository(request: Request, repo_id: str, user_email: str):
             "Authorization": f"Bearer {access_token}",
             "Accept": "application/vnd.github.v3+json"
         }
+        
         repo_info_url = f"https://api.github.com/repos/{owner}/{repo_name}"
         async with httpx.AsyncClient() as client:
             response = await client.get(repo_info_url, headers=headers)
             if response.status_code != 200:
-                return
+                logger.error(f"Failed to get repo info: {response.status_code}")
+                return False
             repo_info = response.json()
             default_branch = repo_info.get("default_branch", "main")
         
@@ -635,10 +614,10 @@ async def scan_repository(request: Request, repo_id: str, user_email: str):
         async with httpx.AsyncClient() as client:
             response = await client.get(tree_url, headers=headers)
             if response.status_code != 200:
-                return
+                logger.error(f"Failed to get repo tree: {response.status_code}")
+                return False
             tree_data = response.json()
             
-        # Add this helper function
         def is_text_file(file_path: str) -> bool:
             text_extensions = ['.py', '.js', '.java', '.c', '.cpp', '.cs', '.php', 
                           '.rb', '.go', '.swift', '.kt', '.ts', '.html', '.css',
@@ -650,8 +629,7 @@ async def scan_repository(request: Request, repo_id: str, user_email: str):
         # Scan all files
         all_findings = []
         for item in tree_data.get("tree", []):
-            if item["type"] == "blob" and item["size"] > 0:  # Only scan files
-                # Skip non-text files
+            if item["type"] == "blob" and item["size"] > 0:
                 if not is_text_file(item['path']):
                     continue
                 
@@ -666,16 +644,12 @@ async def scan_repository(request: Request, repo_id: str, user_email: str):
                         continue
                 
                     try:
-                    # Decode content only for text files
                         content = base64.b64decode(file_data["content"]).decode("utf-8")
-                    
-                    # Scan content
                         findings = detector.scan_text(content)
                         for finding in findings:
                             finding["location"] = f"File: {item['path']}"
                             all_findings.append(finding)
                     except UnicodeDecodeError:
-                    # Skip files that can't be decoded as UTF-8 text
                         continue
                     except Exception as e:
                         logger.error(f"Error processing file {item['path']}: {e}")
@@ -688,7 +662,30 @@ async def scan_repository(request: Request, repo_id: str, user_email: str):
             scan_type="scheduled" if repo["is_monitored"] else "manual"
         )
         
-         # Update repository with scan info
+        # FIXED: Add email notification logic (THIS WAS MISSING!)
+        try:
+            if all_findings:
+                # Send security alert for findings
+                await email_service.send_security_alert(
+                    user_email,
+                    f"Security Alert: {repo['repository_name']}",
+                    all_findings,
+                    str(report["_id"])
+                )
+                logger.info(f"Security alert sent to {user_email} for {len(all_findings)} findings in {repo['repository_name']}")
+            else:
+                # Send no-findings notification
+                await email_service.send_no_findings_alert(
+                    user_email,
+                    repo["repository_name"],
+                    str(report["_id"])
+                )
+                logger.info(f"No-findings alert sent to {user_email} for {repo['repository_name']}")
+        except Exception as email_error:
+            logger.error(f"Failed to send email notification: {email_error}")
+            # Don't fail the scan if email fails - log and continue
+        
+        # Update repository with scan info
         await db.repositories.update_one(
             {"_id": ObjectId(repo_id)},
             {
@@ -700,14 +697,11 @@ async def scan_repository(request: Request, repo_id: str, user_email: str):
             }
         )
         
-        # Set session flag for UI notification
-        request.session["scan_success"] = True
-        request.session["scanned_repo"] = repo["repository_name"]
-        
+        logger.info(f"Repository scan completed: {repo['repository_name']}, findings: {len(all_findings)}")
         return True
-    
+        
     except Exception as e:
-        logger.error(f"Repository scan error: {e}")
+        logger.error(f"Enhanced repository scan error: {e}")
         return False
     
     finally:
@@ -716,8 +710,21 @@ async def scan_repository(request: Request, repo_id: str, user_email: str):
             {"_id": ObjectId(repo_id)},
             {"$set": {"scan_status": "completed"}}
         )
-    
 
+# Keep the old scan_repository function for backward compatibility but mark it as deprecated
+async def scan_repository(request: Request, repo_id: str, user_email: str):
+    """DEPRECATED: Use scan_repository_enhanced instead. Kept for backward compatibility."""
+    logger.warning("Using deprecated scan_repository function. Consider using scan_repository_enhanced.")
+    
+    # Get access token from request session
+    access_token = None
+    try:
+        access_token = request.session.get("github_access_token")
+    except:
+        access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+    
+    # Call the enhanced version
+    return await scan_repository_enhanced(repo_id, user_email, access_token)
 
 def is_binary_file(file_path: str) -> bool:
     """Check if file is binary based on extension"""
@@ -727,10 +734,9 @@ def is_binary_file(file_path: str) -> bool:
                    '.mp3', '.mp4', '.avi', '.mov', '.wav']
     return any(file_path.lower().endswith(ext) for ext in binary_exts)
 
-# Add this route for report details
 @app.get("/report/{report_id}", response_class=HTMLResponse)
-async def report_detail(request: Request, report_id: str):
-    """Display report detail page"""
+async def report_detail_alt(request: Request, report_id: str):
+    """Alternative report detail page route"""
     user = auth.get_current_user(request)
     if not user:
         return RedirectResponse(url="/")
@@ -824,28 +830,39 @@ async def internal_error_handler(request: Request, exc):
         "message": "Internal server error"
     }, status_code=500)
 
-# Add this test route to main.py
 @app.get("/test-email")
 async def test_email(request: Request):
     """Test email delivery"""
-    from .email_service import send_security_alert
-    
-    test_findings = [{
-        "type": "AWS Access Key",
-        "value": "AKIAEXAMPLE",
-        "line": 42,
-        "confidence": 0.95,
-        "context": "const awsKey = 'AKIAEXAMPLE';",
-        "recommendation": "Rotate this key immediately"
-    }]
-    
-    await send_security_alert(
-        "user@example.com",  # Replace with your email
-        "Test Security Alert",
-        test_findings,
-        "test-report-123"
-    )
-    return {"status": "Test email sent"}
+    try:
+        test_findings = [{
+            "type": "AWS Access Key",
+            "value": "AKIAEXAMPLE", 
+            "line": 42,
+            "confidence": 0.95,
+            "context": "const awsKey = 'AKIAEXAMPLE';",
+            "recommendation": "Rotate this key immediately"
+        }]
+        
+        await email_service.send_security_alert(
+            "secretguardian@zohomail.in",  # Replace with your email
+            "Test Security Alert",
+            test_findings,
+            "test-report-123"
+        )
+        return {"status": "Test email sent successfully"}
+    except Exception as e:
+        logger.error(f"Test email failed: {e}")
+        return {"status": "Test email failed", "error": str(e)}
+
+@app.get("/test-smtp")
+async def test_smtp_config(request: Request):
+    """Test SMTP configuration"""
+    try:
+        from .email_service import test_email_configuration
+        success, message = await test_email_configuration()
+        return {"success": success, "message": message}
+    except Exception as e:
+        return {"success": False, "message": f"SMTP test failed: {e}"}
 
 @app.post("/clear-scan-notification")
 async def clear_scan_notification(request: Request):
@@ -856,11 +873,6 @@ async def clear_scan_notification(request: Request):
         del request.session["scanned_repo"]
     return {"status": "success"}
 
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    host = os.getenv("HOST", "0.0.0.0")
-    uvicorn.run("app.main:app", host=host, port=port)
-    
 @app.websocket("/ws/scan-status")
 async def websocket_scan_status(websocket: WebSocket):
     """WebSocket for real-time scan status updates"""
@@ -894,3 +906,8 @@ async def get_scan_status(repo_id: str, request: Request):
     except Exception as e:
         logger.error(f"Scan status error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get scan status")
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    host = os.getenv("HOST", "0.0.0.0")
+    uvicorn.run("app.main:app", host=host, port=port)
