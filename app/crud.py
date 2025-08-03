@@ -29,7 +29,7 @@ async def create_or_get_user(email: str, username: str, full_name: str, provider
     user_data["_id"] = str(result.inserted_id)
     return user_data
 
-async def create_report(user_email: str, repository_name: str, findings: List[Dict], scan_type: str = "webhook") -> Dict[str, Any]:
+async def create_report(user_email: str, repository_name: str, findings: List[Dict], scan_type: str = "automatic") -> Dict[str, Any]:
     """Create a new security report"""
     db = await get_database()
     
@@ -46,6 +46,19 @@ async def create_report(user_email: str, repository_name: str, findings: List[Di
     
     result = await db.reports.insert_one(report_data)
     report_data["_id"] = str(result.inserted_id)  # Convert to string
+    
+    # Update repository scan status
+    await db.repositories.update_one(
+        {"user_email": user_email, "repository_name": repository_name},
+        {
+            "$set": {
+                "last_scan": datetime.utcnow(),
+                "findings_count": len(findings),
+                "scan_status": "completed"
+            }
+        }
+    )
+    
     return report_data
 
 async def get_user_reports(user_email: str, query: dict = {}, limit: int = 50) -> List[Dict[str, Any]]:
