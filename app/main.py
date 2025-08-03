@@ -27,6 +27,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 from .github_integration import scan_and_notify
 from .filters import init_filters
 
+from .scheduler import start_background_scheduler, stop_background_scheduler
+
 load_dotenv()
 
 # Configure logging
@@ -34,6 +36,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SecretGuardian", version="1.0.0")
+
+background_scheduler = None
 
 # Get secret key from environment
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -66,17 +70,32 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 init_filters(templates.env)
 
+# MODIFY your existing startup_event function to include scheduler
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database connection on startup"""
+    """Initialize database connection and start background services on startup"""
+    global background_scheduler
+    
     await database.connect_to_mongo()
-    await start_scan_worker()  # Start scan worker
-    logger.info("Application started successfully")
+    await start_scan_worker()  # Your existing scan worker
+    
+    # START BACKGROUND SCHEDULER FOR REPO POLLING
+    background_scheduler = start_background_scheduler()
+    
+    logger.info("Application started successfully with background scheduler")
 
+# MODIFY your existing shutdown_event function
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Close database connection on shutdown"""
+    """Close database connection and stop background services on shutdown"""
+    global background_scheduler
+    
     await database.close_mongo_connection()
+    
+    # STOP BACKGROUND SCHEDULER
+    if background_scheduler:
+        stop_background_scheduler(background_scheduler)
+    
     logger.info("Application shut down successfully")
 
 @app.get("/", response_class=HTMLResponse)
@@ -906,6 +925,374 @@ async def get_scan_status(repo_id: str, request: Request):
     except Exception as e:
         logger.error(f"Scan status error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get scan status")
+
+
+# Add these endpoints to your existing app/main.py file
+@app.post("/setup-org-webhook")
+async def setup_organization_webhook_endpoint(request: Request):
+    """Setup organization-level webhook for automatic repository detection"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        data = await request.json()
+        org_name = data.get("organization_name")
+        
+        if not org_name:
+            raise HTTPException(status_code=400, detail="Organization name is required")
+        
+        # Call the webhook setup function
+        result = await github_integration.setup_organization_webhook(org_name)
+        
+        if result.get("status") == "success":
+            return JSONResponse({
+                "success": True,
+                "message": f"Organization webhook created for {org_name}",
+                "webhook_id": result.get("webhook_id")
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "error": result.get("error", "Unknown error")
+            }, status_code=400)
+            
+    except Exception as e:
+        logger.error(f"Setup organization webhook error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to setup organization webhook")
+
+@app.get("/webhook-status")
+async def webhook_status(request: Request):
+    """Check webhook status and provide setup instructions"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
+        webhook_url = f"{base_url}/github-webhook"
+        
+        return JSONResponse({
+            "webhook_url": webhook_url,
+            "webhook_secret_configured": bool(os.getenv("GITHUB_WEBHOOK_SECRET")),
+            "github_token_configured": bool(os.getenv("GITHUB_ACCESS_TOKEN")),
+            "instructions": {
+                "step1": "Go to your GitHub organization settings",
+                "step2": "Navigate to Settings > Webhooks",
+                "step3": "Click 'Add webhook'",
+                "step4": f"Set Payload URL to: {webhook_url}",
+                "step5": "Set Content type to: application/json",
+                "step6": "Add your webhook secret",
+                "step7": "Select events: Repository, Push, Pull request",
+                "step8": "Click 'Add webhook'"
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Webhook status error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get webhook status")
+
+@app.delete("/api/repositories/{repo_id}")
+async def delete_repository(repo_id: str, request: Request):
+    """Delete repository from monitoring"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        success = await crud.delete_repository(repo_id)
+        
+        if success:
+            return JSONResponse({"success": True, "message": "Repository deleted successfully"})
+        else:
+            raise HTTPException(status_code=404, detail="Repository not found")
+            
+    except Exception as e:
+        logger.error(f"Delete repository error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete repository")
+
+# Enhanced scan repository endpoint
+@app.get("/repositories/{repo_id}/scan")
+async def manual_scan_repository(repo_id: str, request: Request):
+    """Manual scan with guaranteed notifications - ENHANCED VERSION"""
+    user = auth.get_current_user(request)
+    if not user:
+        return RedirectResponse(url="/")
+
+    try:
+        db = await database.get_database()
+        repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
+        
+        if not repo or repo["user_email"] != user["email"]:
+            return RedirectResponse(url="/repositories?error=not_found")
+
+        # Get access token
+        access_token = os.getenv("GITHUB_ACCESS_TOKEN")
+        if not access_token:
+            logger.error("GitHub access token not configured")
+            return RedirectResponse(url="/repositories?error=no_token")
+
+        # Trigger enhanced scan
+        success = await github_integration.scan_repository_enhanced(
+            repo_id, 
+            user["email"], 
+            access_token
+        )
+        
+        if success:
+            # Set success notification in session
+            request.session["scan_notification"] = {
+                "type": "success",
+                "message": f"Scan completed for {repo['repository_name']}. Check your email for results."
+            }
+            return RedirectResponse(url="/repositories?scan_complete=true&scan_success=true")
+        else:
+            # Set error notification in session
+            request.session["scan_notification"] = {
+                "type": "error", 
+                "message": f"Scan failed for {repo['repository_name']}. Please try again or check logs."
+            }
+            return RedirectResponse(url="/repositories?scan_complete=true&scan_success=false")
+
+    except Exception as e:
+        logger.error(f"Manual scan error: {e}")
+        request.session["scan_notification"] = {
+            "type": "error",
+            "message": "An error occurred during scanning. Please try again."
+        }
+        return RedirectResponse(url="/repositories?error=scan_failed")
+
+@app.post("/clear-scan-notification")
+async def clear_scan_notification(request: Request):
+    """Clear scan notification from session"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    request.session.pop("scan_notification", None)
+    return JSONResponse({"success": True})
+
+# Enhanced repository scanning function - ADD THIS FUNCTION TO MAIN.PY
+async def scan_repository_enhanced(repo_id: str, user_email: str, access_token: str) -> bool:
+    """Enhanced repository scanning with better error handling and email notifications"""
+    
+    try:
+        db = await database.get_database()
+        repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
+        
+        if not repo:
+            logger.error(f"Repository with ID {repo_id} not found")
+            return False
+        
+        repo_url = repo["repository_url"]
+        repo_name = repo["repository_name"]
+        
+        if "github.com" not in repo_url:
+            logger.error(f"Not a GitHub repository: {repo_url}")
+            return False
+        
+        # Extract owner and repo name from URL or repository_name
+        if "/" in repo_name:
+            owner, repo_short_name = repo_name.split("/", 1)
+        else:
+            # Fallback: extract from URL
+            parts = repo_url.split("github.com/")[1].split("/")
+            if len(parts) < 2:
+                logger.error(f"Cannot parse repository URL: {repo_url}")
+                return False
+            owner = parts[0]
+            repo_short_name = parts[1].replace(".git", "")
+        
+        # Update scan status
+        await db.repositories.update_one(
+            {"_id": ObjectId(repo_id)},
+            {"$set": {"scan_status": "scanning", "last_scan_started": datetime.utcnow()}}
+        )
+        
+        headers = {"Authorization": f"Bearer {access_token}"}
+        
+        # Get repository information
+        repo_info_url = f"https://api.github.com/repos/{owner}/{repo_short_name}"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(repo_info_url, headers=headers)
+            
+            if response.status_code == 404:
+                logger.error(f"Repository not found or access denied: {owner}/{repo_short_name}")
+                return False
+            elif response.status_code != 200:
+                logger.error(f"Failed to get repository info: {response.status_code} - {response.text}")
+                return False
+        
+        repo_info = response.json()
+        default_branch = repo_info.get("default_branch", "main")
+        
+        logger.info(f"Scanning repository: {owner}/{repo_short_name}, branch: {default_branch}")
+        
+        # Get repository tree
+        tree_url = f"https://api.github.com/repos/{owner}/{repo_short_name}/git/trees/{default_branch}?recursive=1"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(tree_url, headers=headers)
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to get repository tree: {response.status_code} - {response.text}")
+                return False
+        
+        tree_data = response.json()
+        
+        def is_text_file(file_path: str) -> bool:
+            text_extensions = ['.py', '.js', '.java', '.c', '.cpp', '.cs', '.php',
+                             '.rb', '.go', '.swift', '.kt', '.ts', '.html', '.css',
+                             '.json', '.yml', '.yaml', '.toml', '.ini', '.cfg',
+                             '.md', '.txt', '.env', '.sh', '.bat', '.ps1', '.sql',
+                             '.xml', '.csv', '.log', '.conf', '.config', '.dockerfile']
+            return any(file_path.lower().endswith(ext) for ext in text_extensions)
+        
+        # Scan all files
+        all_findings = []
+        scanned_files_count = 0
+        
+        for item in tree_data.get("tree", []):
+            if item["type"] == "blob" and item.get("size", 0) > 0:
+                file_path = item["path"]
+                
+                if not is_text_file(file_path):
+                    continue
+                
+                # Skip large files (> 1MB)
+                if item.get("size", 0) > 1024 * 1024:
+                    continue
+                    
+                file_url = f"https://api.github.com/repos/{owner}/{repo_short_name}/contents/{file_path}?ref={default_branch}"
+                
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(file_url, headers=headers)
+                        
+                        if response.status_code != 200:
+                            continue
+                    
+                    file_data = response.json()
+                    
+                    if "content" not in file_data:
+                        continue
+                    
+                    # Decode file content
+                    try:
+                        content = base64.b64decode(file_data["content"]).decode("utf-8")
+                    except UnicodeDecodeError:
+                        continue
+                    
+                    # Scan for secrets
+                    findings = detector.scan_text(content)
+                    
+                    for finding in findings:
+                        finding["location"] = f"File: {file_path}"
+                        finding["repository"] = repo_name
+                        all_findings.append(finding)
+                    
+                    scanned_files_count += 1
+                
+                except Exception as e:
+                    logger.error(f"Error processing file {file_path}: {e}")
+                    continue
+        
+        # Create report
+        report = await crud.create_report(
+            user_email=user_email,
+            repository_name=repo_name,
+            findings=all_findings,
+            scan_type="manual"
+        )
+        
+        # FIXED: Add email notification logic
+        try:
+            if all_findings:
+                # Send security alert for findings
+                await email_service.send_security_alert(
+                    user_email,
+                    f"🚨 Security Alert: {repo_name} - {len(all_findings)} secrets found",
+                    all_findings,
+                    str(report["_id"])
+                )
+                logger.info(f"Security alert sent to {user_email} for {len(all_findings)} findings in {repo_name}")
+            else:
+                # Send no-findings notification
+                await email_service.send_no_findings_alert(
+                    user_email,
+                    repo_name,
+                    str(report["_id"])
+                )
+                logger.info(f"No-findings alert sent to {user_email} for {repo_name}")
+        
+        except Exception as email_error:
+            logger.error(f"Failed to send email notification: {email_error}")
+            # Don't fail the scan if email fails
+        
+        # Update repository with scan info
+        await db.repositories.update_one(
+            {"_id": ObjectId(repo_id)},
+            {"$set": {
+                "last_scan": datetime.utcnow(),
+                "findings_count": len(all_findings),
+                "scan_status": "completed",
+                "scanned_files_count": scanned_files_count
+            }}
+        )
+        
+        logger.info(f"Repository scan completed: {repo_name}, findings: {len(all_findings)}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Enhanced repository scan error: {e}")
+        # Update scan status to failed
+        try:
+            await db.repositories.update_one(
+                {"_id": ObjectId(repo_id)},
+                {"$set": {"scan_status": "failed", "error_message": str(e)}}
+            )
+        except:
+            pass
+        return False
+
+
+# ADD this new endpoint to store user GitHub tokens persistently
+@app.post("/api/store-github-token")
+async def store_github_token(request: Request):
+    """Store user's GitHub token for background polling"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        # Get the GitHub access token from session
+        github_token = request.session.get("github_access_token")
+        
+        if not github_token:
+            raise HTTPException(status_code=400, detail="No GitHub token found in session")
+        
+        # Store the token in database for background polling
+        db = await database.get_database()
+        
+        # Update user record with GitHub token
+        await db.users.update_one(
+            {"email": user["email"]},
+            {
+                "$set": {
+                    "github_access_token": github_token,
+                    "token_updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        logger.info(f"GitHub token stored for user: {user['email']}")
+        
+        return JSONResponse({"success": True, "message": "GitHub token stored successfully"})
+        
+    except Exception as e:
+        logger.error(f"Error storing GitHub token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to store GitHub token")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
