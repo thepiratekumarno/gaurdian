@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Any
 import logging
+from . import database
 
 logger = logging.getLogger(__name__)
 
@@ -431,3 +432,112 @@ async def test_email_configuration():
         
     except Exception as e:
         return False, f"SMTP test failed: {e}"
+
+async def send_commit_clean_alert(user_email: str, repository_name: str, report_id: str):
+    """
+    Send email notification for repositories with new commits but no security issues
+    ADD THIS FUNCTION to your existing app/email_service.py
+    """
+    try:
+        logger.info(f"Sending commit clean alert to {user_email} for repository: {repository_name}")
+        
+        # Email content for clean commits
+        subject = f"✅ COMMIT UPDATE: {repository_name} - No security issues found"
+        
+        html_content = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(90deg, #4CAF50, #2E7D32); padding: 20px; text-align: center;">
+                <h1 style="color: white; margin: 0;">✅ Repository Updated - All Clear!</h1>
+            </div>
+            
+            <div style="padding: 20px; background-color: #f5f5f5;">
+                <h2 style="color: #2E7D32;">Repository: {repository_name}</h2>
+                
+                <div style="background: white; padding: 15px; border-radius: 5px; border-left: 4px solid #4CAF50;">
+                    <h3 style="color: #2E7D32; margin-top: 0;">🔄 New Commits Detected</h3>
+                    <p>We detected new commits in your repository <strong>{repository_name}</strong> and automatically scanned the latest changes.</p>
+                    
+                    <div style="background: #E8F5E8; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                        <h4 style="color: #2E7D32; margin: 0 0 10px 0;">✅ Scan Results: All Clear!</h4>
+                        <p style="margin: 0; color: #2E7D32;">
+                            <strong>No security issues found in your latest commits.</strong><br>
+                            Your code changes look secure and don't contain any exposed secrets.
+                        </p>
+                    </div>
+                    
+                    <h4 style="color: #333;">What we scanned:</h4>
+                    <ul style="color: #666;">
+                        <li>All text files in your repository</li>
+                        <li>API keys, passwords, and tokens</li>
+                        <li>Database connection strings</li>
+                        <li>Private keys and certificates</li>
+                        <li>Other sensitive information patterns</li>
+                    </ul>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <a href="{os.getenv('BASE_URL', 'https://secretguardian.onrender.com')}/report/{report_id}" 
+                       style="background: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                        View Full Report
+                    </a>
+                </div>
+                
+                <div style="margin-top: 20px; padding: 15px; background: #E3F2FD; border-radius: 5px;">
+                    <h4 style="color: #1976D2; margin: 0 0 10px 0;">💡 Keep Your Code Secure:</h4>
+                    <ul style="margin: 0; color: #666;">
+                        <li>Never commit API keys or passwords</li>
+                        <li>Use environment files (.env) for sensitive data</li>
+                        <li>Add .env files to your .gitignore</li>
+                        <li>Rotate exposed credentials immediately</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div style="background: #333; color: white; padding: 15px; text-align: center;">
+                <p style="margin: 0; font-size: 12px;">
+                    SecretGuardian - Automatic Repository Security Monitoring<br>
+                    This scan was triggered by detecting new commits in your repository.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Plain text version
+        text_content = f"""
+        ✅ REPOSITORY UPDATED - ALL CLEAR!
+        
+        Repository: {repository_name}
+        
+        🔄 NEW COMMITS DETECTED
+        We detected new commits in your repository and automatically scanned the latest changes.
+        
+        ✅ SCAN RESULTS: All Clear!
+        No security issues found in your latest commits.
+        Your code changes look secure and don't contain any exposed secrets.
+        
+        View full report: {os.getenv('BASE_URL', 'https://secretguardian.onrender.com')}/report/{report_id}
+        
+        ---
+        SecretGuardian - Automatic Repository Security Monitoring
+        This scan was triggered by detecting new commits in your repository.
+        """
+        
+        success = await send_email(
+            to_email=user_email,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content
+        )
+        
+        if success:
+            logger.info(f"Commit clean alert sent successfully to {user_email}")
+        else:
+            logger.error(f"Failed to send commit clean alert to {user_email}")
+            
+        return success
+        
+    except Exception as e:
+        logger.error(f"Error sending commit clean alert: {str(e)}")
+        return False
