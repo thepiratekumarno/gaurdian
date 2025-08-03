@@ -29,6 +29,7 @@ from .filters import init_filters
 
 from .scheduler import start_background_scheduler, stop_background_scheduler
 
+
 load_dotenv()
 
 # Configure logging
@@ -70,21 +71,22 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 init_filters(templates.env)
 
-# MODIFY your existing startup_event function to include scheduler
+# 4. MODIFY your existing startup_event function (replace the entire function)
 @app.on_event("startup")
 async def startup_event():
     """Initialize database connection and start background services on startup"""
     global background_scheduler
     
     await database.connect_to_mongo()
-    await start_scan_worker()  # Your existing scan worker
+    await start_scan_worker()
     
-    # START BACKGROUND SCHEDULER FOR REPO POLLING
+    # START 1-MINUTE BACKGROUND SCHEDULER
+    from .scheduler import start_background_scheduler
     background_scheduler = start_background_scheduler()
     
-    logger.info("Application started successfully with background scheduler")
+    logger.info("🚀 Application started successfully with 1-MINUTE background scheduler")
 
-# MODIFY your existing shutdown_event function
+# 5. MODIFY your existing shutdown_event function (replace the entire function)
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close database connection and stop background services on shutdown"""
@@ -94,9 +96,10 @@ async def shutdown_event():
     
     # STOP BACKGROUND SCHEDULER
     if background_scheduler:
+        from .scheduler import stop_background_scheduler
         stop_background_scheduler(background_scheduler)
     
-    logger.info("Application shut down successfully")
+    logger.info("🔄 Application shut down successfully")
 
 @app.get("/", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -565,146 +568,41 @@ async def delete_report(report_id: str, request: Request):
         raise HTTPException(status_code=500, detail="Failed to delete report")
 
 # FIXED: Enhanced repository scanner with email notifications
-async def scan_repository_enhanced(repo_id: str, user_email: str, access_token: str = None):
-    """Enhanced repository scanner that doesn't depend on request session and includes email notifications"""
-    db = await database.get_database()
-    
+async def scan_repository_enhanced(repo_id: str, user_email: str, access_token: str) -> bool:
+    """
+    UPDATED: Enhanced repository scanning that works with the new scheduler
+    """
     try:
+        db = await database.get_database()
         repo = await db.repositories.find_one({"_id": ObjectId(repo_id)})
+        
         if not repo:
-            logger.error(f"Repository not found: {repo_id}")
+            logger.error(f"❌ Repository with ID {repo_id} not found")
             return False
-            
-        # Use provided access token or fall back to environment variable
-        if not access_token:
-            access_token = os.getenv("GITHUB_ACCESS_TOKEN")
         
-        if not access_token:
-            logger.error("No GitHub access token available for scanning")
-            return False
-            
-        # Extract owner and repo name
-        repo_url = repo["repository_url"]
-        if "github.com" not in repo_url:
-            logger.error(f"Not a GitHub repository: {repo_url}")
-            return False
-            
-        parts = repo_url.split("github.com/")[1].split("/")
-        if len(parts) < 2:
-            logger.error(f"Invalid GitHub URL format: {repo_url}")
-            return False
-            
-        owner = parts[0]
-        repo_name = parts[1]
+        repo_name = repo["repository_name"]
         
-        # Get default branch
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        
-        repo_info_url = f"https://api.github.com/repos/{owner}/{repo_name}"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(repo_info_url, headers=headers)
-            if response.status_code != 200:
-                logger.error(f"Failed to get repo info: {response.status_code}")
-                return False
-            repo_info = response.json()
-            default_branch = repo_info.get("default_branch", "main")
-        
-        # Get repository tree
-        tree_url = f"https://api.github.com/repos/{owner}/{repo_name}/git/trees/{default_branch}?recursive=1"
-        async with httpx.AsyncClient() as client:
-            response = await client.get(tree_url, headers=headers)
-            if response.status_code != 200:
-                logger.error(f"Failed to get repo tree: {response.status_code}")
-                return False
-            tree_data = response.json()
-            
-        def is_text_file(file_path: str) -> bool:
-            text_extensions = ['.py', '.js', '.java', '.c', '.cpp', '.cs', '.php', 
-                          '.rb', '.go', '.swift', '.kt', '.ts', '.html', '.css',
-                          '.json', '.yml', '.yaml', '.toml', '.ini', '.cfg',
-                          '.md', '.txt', '.env', '.sh', '.bat', '.ps1', '.sql',
-                          '.xml', '.csv', '.log', '.conf', '.config']
-            return any(file_path.lower().endswith(ext) for ext in text_extensions)
-        
-        # Scan all files
-        all_findings = []
-        for item in tree_data.get("tree", []):
-            if item["type"] == "blob" and item["size"] > 0:
-                if not is_text_file(item['path']):
-                    continue
-                
-                file_url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{item['path']}?ref={default_branch}"
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(file_url, headers=headers)
-                    if response.status_code != 200:
-                        continue
-                
-                    file_data = response.json()
-                    if "content" not in file_data:
-                        continue
-                
-                    try:
-                        content = base64.b64decode(file_data["content"]).decode("utf-8")
-                        findings = detector.scan_text(content)
-                        for finding in findings:
-                            finding["location"] = f"File: {item['path']}"
-                            all_findings.append(finding)
-                    except UnicodeDecodeError:
-                        continue
-                    except Exception as e:
-                        logger.error(f"Error processing file {item['path']}: {e}")
-        
-        # Create report
-        report = await crud.create_report(
-            user_email=user_email,
-            repository_name=repo["repository_name"],
-            findings=all_findings,
-            scan_type="scheduled" if repo["is_monitored"] else "manual"
-        )
-        
-        # FIXED: Add email notification logic (THIS WAS MISSING!)
-        try:
-            if all_findings:
-                # Send security alert for findings
-                await email_service.send_security_alert(
-                    user_email,
-                    f"Security Alert: {repo['repository_name']}",
-                    all_findings,
-                    str(report["_id"])
-                )
-                logger.info(f"Security alert sent to {user_email} for {len(all_findings)} findings in {repo['repository_name']}")
-            else:
-                # Send no-findings notification
-                await email_service.send_no_findings_alert(
-                    user_email,
-                    repo["repository_name"],
-                    str(report["_id"])
-                )
-                logger.info(f"No-findings alert sent to {user_email} for {repo['repository_name']}")
-        except Exception as email_error:
-            logger.error(f"Failed to send email notification: {email_error}")
-            # Don't fail the scan if email fails - log and continue
-        
-        # Update repository with scan info
+        # Update scan status to scanning
         await db.repositories.update_one(
             {"_id": ObjectId(repo_id)},
-            {
-                "$set": {
-                    "last_scan": datetime.utcnow(),
-                    "findings_count": len(all_findings),
-                    "scan_status": "completed"
-                }
-            }
+            {"$set": {
+                "scan_status": "scanning", 
+                "last_scan_started": datetime.utcnow()
+            }}
         )
         
-        logger.info(f"Repository scan completed: {repo['repository_name']}, findings: {len(all_findings)}")
-        return True
+        logger.info(f"🔍 Manual scan for repository: {repo_name}")
+        
+        # Use the scheduler's scan function for consistency
+        from .scheduler import scan_repository_with_notifications
+        success = await scan_repository_with_notifications(
+            repo_id, user_email, access_token, repo_name, "manual"
+        )
+        
+        return success
         
     except Exception as e:
-        logger.error(f"Enhanced repository scan error: {e}")
+        logger.error(f"💥 Manual scan error for {repo_name}: {e}")
         return False
     
     finally:
@@ -1277,6 +1175,144 @@ async def store_github_token(request: Request):
     except Exception as e:
         logger.error(f"Error storing GitHub token: {e}")
         raise HTTPException(status_code=500, detail="Failed to store GitHub token")
+
+# 2. ADD this test endpoint to test the 1-minute polling manually
+@app.get("/test-1min-polling")
+async def test_1min_polling(request: Request):
+    """Test 1-minute polling manually"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        # Manually trigger the polling function for testing
+        from .scheduler import poll_user_repos
+        await poll_user_repos()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "1-minute polling test completed. Check logs for results."
+        })
+    except Exception as e:
+        logger.error(f"Test 1-minute polling error: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
+
+
+# 3. ADD this endpoint to check polling status
+@app.get("/polling-status")
+async def polling_status(request: Request):
+    """Check polling status and recent activity"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        db = await database.get_database()
+        
+        # Get recent repository additions
+        recent_repos = await db.repositories.find({
+            "user_email": user["email"],
+            "auto_detected": True,
+            "added_at": {"$gte": datetime.utcnow() - timedelta(hours=24)}
+        }).sort("added_at", -1).to_list(10)
+        
+        # Get recent scans
+        recent_scans = await db.repositories.find({
+            "user_email": user["email"],
+            "last_scan": {"$gte": datetime.utcnow() - timedelta(hours=24)}
+        }).sort("last_scan", -1).to_list(10)
+        
+        return JSONResponse({
+            "polling_interval": "1 minute",
+            "recent_auto_detected_repos": len(recent_repos),
+            "recent_scans": len(recent_scans),
+            "recent_repos": [
+                {
+                    "name": repo["repository_name"],
+                    "added_at": repo["added_at"].isoformat(),
+                    "scan_status": repo.get("scan_status", "unknown")
+                }
+                for repo in recent_repos
+            ]
+        })
+    except Exception as e:
+        logger.error(f"Polling status error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get polling status")
+
+
+# 7. ADD this helper function for debugging
+async def update_scan_status(repo_id: str, status: str, error_message: str = None):
+    """Update repository scan status with error message"""
+    try:
+        db = await database.get_database()
+        update_data = {
+            "scan_status": status,
+            "last_scan_completed": datetime.utcnow()
+        }
+        if error_message:
+            update_data["error_message"] = error_message
+            update_data["last_scan_failed"] = datetime.utcnow()
+            
+        await db.repositories.update_one(
+            {"_id": ObjectId(repo_id)}, 
+            {"$set": update_data}
+        )
+        logger.info(f"📝 Updated scan status to '{status}' for repo {repo_id}")
+    except Exception as e:
+        logger.error(f"💥 Failed to update scan status: {e}")
+
+# 8. ADD this endpoint to manually trigger scanning for specific repo
+@app.post("/api/repositories/{repo_id}/force-scan")
+async def force_scan_repository(repo_id: str, request: Request):
+    """Force scan a repository immediately"""
+    user = auth.get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        db = await database.get_database()
+        repo = await db.repositories.find_one({
+            "_id": ObjectId(repo_id),
+            "user_email": user["email"]
+        })
+        
+        if not repo:
+            raise HTTPException(status_code=404, detail="Repository not found")
+        
+        # Get user's GitHub token
+        user_doc = await db.users.find_one({"email": user["email"]})
+        github_token = user_doc.get("github_access_token") if user_doc else None
+        
+        if not github_token:
+            github_token = os.getenv("GITHUB_ACCESS_TOKEN")
+        
+        if not github_token:
+            raise HTTPException(status_code=400, detail="No GitHub token available")
+        
+        # Trigger scan
+        from .scheduler import scan_repository_with_notifications
+        success = await scan_repository_with_notifications(
+            repo_id, user["email"], github_token, repo["repository_name"], "manual"
+        )
+        
+        if success:
+            return JSONResponse({
+                "success": True,
+                "message": f"Scan completed for {repo['repository_name']}"
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "message": f"Scan failed for {repo['repository_name']}"
+            }, status_code=500)
+        
+    except Exception as e:
+        logger.error(f"Force scan error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to force scan")
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
