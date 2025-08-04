@@ -1,6 +1,3 @@
-# COMPLETE app/scheduler.py - 1 minute polling with commit detection
-# REPLACE your entire app/scheduler.py file with this code
-
 import asyncio
 import httpx
 import os
@@ -17,13 +14,14 @@ logger = logging.getLogger(__name__)
 
 async def poll_user_repos():
     """
-    COMPLETE: Check for new repositories AND new commits every 1 minute
-    - Detects new repositories within 1 minute
-    - Detects new commits in existing repositories
-    - Automatically scans and sends emails
+    30-SECOND POLLING with 15-MINUTE FREEZE LOGIC:
+    - Detects new repositories within 30 seconds
+    - Scans existing repos on FIRST commit, then freezes for 15 minutes
+    - After 15 minutes, scans ONCE if there were commits during freeze
+    - No endless loops - only scans when needed
     """
     try:
-        logger.info("🚀 Starting 1-minute polling for repos and commits...")
+        logger.info("🚀 Starting 30-second polling with 15-min freeze logic...")
         
         db = await database.get_database()
         
@@ -38,7 +36,8 @@ async def poll_user_repos():
         
         logger.info(f"👥 Found {len(users)} users with GitHub tokens")
         new_repos_found = 0
-        commits_detected = 0
+        repos_scanned = 0
+        repos_frozen = 0
         
         for user in users:
             try:
@@ -49,7 +48,7 @@ async def poll_user_repos():
                     logger.warning(f"⚠️ No GitHub token for user {user_email}")
                     continue
                 
-                logger.info(f"🔍 Checking repos + commits for user: {user_email}")
+                logger.info(f"🔍 Checking repos for user: {user_email}")
                 
                 # Fetch user's repositories from GitHub API
                 headers = {
@@ -64,6 +63,11 @@ async def poll_user_repos():
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.get(url, headers=headers)
                 
+                # Check for rate limiting
+                rate_limit_remaining = response.headers.get("X-RateLimit-Remaining")
+                if rate_limit_remaining:
+                    logger.info(f"📊 GitHub API rate limit remaining: {rate_limit_remaining}")
+                
                 if response.status_code == 401:
                     logger.error(f"🔑 Invalid GitHub token for user {user_email}")
                     continue
@@ -77,7 +81,7 @@ async def poll_user_repos():
                 repos = response.json()
                 logger.info(f"📊 Checking {len(repos)} repositories for user {user_email}")
                 
-                # Process each repository
+                # Process each repository with freeze logic
                 for repo_data in repos:
                     try:
                         full_name = repo_data["full_name"]
@@ -90,6 +94,9 @@ async def poll_user_repos():
                         if not pushed_at:
                             continue
                         
+                        # Parse GitHub's pushed_at timestamp
+                        github_pushed_time = datetime.fromisoformat(pushed_at.replace('Z', '+00:00'))
+                        
                         # Check if this repository exists in our database
                         existing_repo = await db.repositories.find_one({
                             "user_email": user_email,
@@ -97,7 +104,7 @@ async def poll_user_repos():
                         })
                         
                         if not existing_repo:
-                            # 🆕 NEW REPOSITORY DETECTED!
+                            # 🆕 NEW REPOSITORY DETECTED - Always scan immediately
                             logger.info(f"🆕 NEW REPOSITORY: {full_name} for {user_email}")
                             
                             # Add repository to database
@@ -113,8 +120,10 @@ async def poll_user_repos():
                                 "is_private": is_private,
                                 "auto_detected": True,
                                 "github_updated_at": datetime.fromisoformat(updated_at.replace('Z', '+00:00')),
-                                "github_pushed_at": datetime.fromisoformat(pushed_at.replace('Z', '+00:00')),
-                                "last_known_push": pushed_at
+                                "github_pushed_at": github_pushed_time,
+                                "last_known_push": pushed_at,
+                                "scan_frozen_until": None,  # New repos are not frozen
+                                "commits_during_freeze": 0
                             }
                             
                             result = await db.repositories.insert_one(repo_doc)
@@ -123,49 +132,134 @@ async def poll_user_repos():
                             logger.info(f"✅ Added new repository: {full_name} (ID: {repo_id})")
                             new_repos_found += 1
                             
-                            # 🚀 TRIGGER SCAN FOR NEW REPOSITORY
+                            # 🚀 SCAN NEW REPOSITORY IMMEDIATELY
                             success = await scan_repository_with_notifications(
                                 repo_id, user_email, github_token, full_name, "new_repository"
                             )
                             
                             if success:
-                                logger.info(f"✅ New repo scan completed: {full_name}")
+                                # Set 15-minute freeze after first scan
+                                freeze_until = datetime.utcnow() + timedelta(minutes=15)
+                                await db.repositories.update_one(
+                                    {"_id": ObjectId(repo_id)},
+                                    {"$set": {"scan_frozen_until": freeze_until}}
+                                )
+                                logger.info(f"✅ New repo scan completed, frozen until: {freeze_until}")
+                                repos_scanned += 1
                             else:
                                 logger.error(f"❌ New repo scan failed: {full_name}")
                         
                         else:
-                            # 🔄 EXISTING REPOSITORY - CHECK FOR NEW COMMITS
+                            # 🔄 EXISTING REPOSITORY - Apply 15-minute freeze logic
+                            repo_id = str(existing_repo["_id"])
                             last_known_push = existing_repo.get("last_known_push")
+                            scan_frozen_until = existing_repo.get("scan_frozen_until")
+                            commits_during_freeze = existing_repo.get("commits_during_freeze", 0)
                             
-                            if pushed_at and pushed_at != last_known_push:
-                                logger.info(f"🔄 NEW COMMITS DETECTED in {full_name}")
+                            # Check if there's a new commit
+                            if pushed_at != last_known_push:
+                                logger.info(f"🔄 NEW COMMIT detected in {full_name}")
                                 logger.info(f"   Previous push: {last_known_push}")
                                 logger.info(f"   Latest push: {pushed_at}")
                                 
-                                # Update the last known push time
-                                await db.repositories.update_one(
-                                    {"_id": existing_repo["_id"]},
-                                    {
-                                        "$set": {
-                                            "last_known_push": pushed_at,
-                                            "github_pushed_at": datetime.fromisoformat(pushed_at.replace('Z', '+00:00')),
-                                            "scan_status": "pending",
-                                            "updated_at": datetime.utcnow()
+                                now = datetime.utcnow()
+                                
+                                # Parse freeze time if it exists
+                                freeze_time = None
+                                if scan_frozen_until:
+                                    if isinstance(scan_frozen_until, str):
+                                        freeze_time = datetime.fromisoformat(scan_frozen_until.replace('Z', '+00:00'))
+                                    else:
+                                        freeze_time = scan_frozen_until
+                                
+                                if freeze_time is None or now >= freeze_time:
+                                    # ✅ NOT FROZEN - Can scan now
+                                    logger.info(f"🚀 Scanning {full_name} - not frozen")
+                                    
+                                    # Update repository with new push info
+                                    await db.repositories.update_one(
+                                        {"_id": existing_repo["_id"]},
+                                        {
+                                            "$set": {
+                                                "last_known_push": pushed_at,
+                                                "github_pushed_at": github_pushed_time,
+                                                "scan_status": "pending",
+                                                "commits_during_freeze": 0
+                                            }
                                         }
-                                    }
-                                )
+                                    )
+                                    
+                                    # 🚀 TRIGGER SCAN
+                                    success = await scan_repository_with_notifications(
+                                        repo_id, user_email, github_token, full_name, "new_commits"
+                                    )
+                                    
+                                    if success:
+                                        # Set new 15-minute freeze
+                                        new_freeze_until = now + timedelta(minutes=15)
+                                        await db.repositories.update_one(
+                                            {"_id": existing_repo["_id"]},
+                                            {"$set": {"scan_frozen_until": new_freeze_until}}
+                                        )
+                                        logger.info(f"✅ Commit scan completed, frozen until: {new_freeze_until}")
+                                        repos_scanned += 1
+                                    else:
+                                        logger.error(f"❌ Commit scan failed: {full_name}")
                                 
-                                commits_detected += 1
-                                
-                                # 🚀 TRIGGER SCAN FOR UPDATED REPOSITORY
-                                success = await scan_repository_with_notifications(
-                                    str(existing_repo["_id"]), user_email, github_token, full_name, "new_commits"
-                                )
-                                
-                                if success:
-                                    logger.info(f"✅ Commit scan completed: {full_name}")
                                 else:
-                                    logger.error(f"❌ Commit scan failed: {full_name}")
+                                    # ❄️ FROZEN - Just track the commit for later
+                                    logger.info(f"❄️ {full_name} is frozen until {freeze_time}")
+                                    logger.info(f"   Tracking commit for post-freeze scan")
+                                    
+                                    # Update commit info but don't scan
+                                    await db.repositories.update_one(
+                                        {"_id": existing_repo["_id"]},
+                                        {
+                                            "$set": {
+                                                "last_known_push": pushed_at,
+                                                "github_pushed_at": github_pushed_time,
+                                                "commits_during_freeze": commits_during_freeze + 1
+                                            }
+                                        }
+                                    )
+                                    repos_frozen += 1
+                            
+                            else:
+                                # No new commits - check if freeze expired with pending commits
+                                now = datetime.utcnow()
+                                freeze_time = None
+                                if scan_frozen_until:
+                                    if isinstance(scan_frozen_until, str):
+                                        freeze_time = datetime.fromisoformat(scan_frozen_until.replace('Z', '+00:00'))
+                                    else:
+                                        freeze_time = scan_frozen_until
+                                
+                                # If freeze just expired and we had commits during freeze
+                                if (freeze_time and now >= freeze_time and 
+                                    commits_during_freeze > 0):
+                                    
+                                    logger.info(f"🔓 Freeze expired for {full_name} with {commits_during_freeze} pending commits")
+                                    
+                                    # 🚀 TRIGGER POST-FREEZE SCAN
+                                    success = await scan_repository_with_notifications(
+                                        repo_id, user_email, github_token, full_name, "post_freeze_commits"
+                                    )
+                                    
+                                    if success:
+                                        # Clear freeze and reset counters
+                                        await db.repositories.update_one(
+                                            {"_id": existing_repo["_id"]},
+                                            {
+                                                "$set": {
+                                                    "scan_frozen_until": None,  # Clear freeze
+                                                    "commits_during_freeze": 0
+                                                }
+                                            }
+                                        )
+                                        logger.info(f"✅ Post-freeze scan completed for {full_name}")
+                                        repos_scanned += 1
+                                    else:
+                                        logger.error(f"❌ Post-freeze scan failed: {full_name}")
                         
                     except Exception as repo_error:
                         logger.error(f"❌ Error processing repository {repo_data.get('full_name', 'unknown')}: {repo_error}")
@@ -175,21 +269,22 @@ async def poll_user_repos():
                 logger.error(f"❌ Error polling repos for user {user.get('email', 'unknown')}: {user_error}")
                 continue
         
-        if new_repos_found > 0 or commits_detected > 0:
-            logger.info(f"🎯 1-minute polling completed:")
+        # Summary log
+        if new_repos_found > 0 or repos_scanned > 0 or repos_frozen > 0:
+            logger.info(f"🎯 30-second polling with freeze logic completed:")
             logger.info(f"   🆕 New repositories: {new_repos_found}")
-            logger.info(f"   🔄 Repositories with new commits: {commits_detected}")
+            logger.info(f"   🚀 Repositories scanned: {repos_scanned}")
+            logger.info(f"   ❄️ Repositories frozen: {repos_frozen}")
         else:
-            logger.info("🔄 1-minute polling completed - no changes detected")
+            logger.info("🔄 30-second polling completed - no changes detected")
         
-    except Exception as e:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
-
-        logger.error(f"💥 Critical error in 1-minute polling: {e}")
+    except Exception as e:
+        logger.error(f"💥 Critical error in 30-second polling: {e}")
 
 async def scan_repository_with_notifications(repo_id: str, user_email: str, access_token: str, repo_name: str, scan_reason: str) -> bool:
     """
-    COMPLETE: Enhanced repository scanning with different email messages
-    scan_reason: "new_repository" or "new_commits"
+    Enhanced repository scanning with different email messages
+    scan_reason: "new_repository", "new_commits", or "post_freeze_commits"
     """
     try:
         db = await database.get_database()
@@ -206,8 +301,10 @@ async def scan_repository_with_notifications(repo_id: str, user_email: str, acce
         
         if scan_reason == "new_repository":
             logger.info(f"🆕 Scanning NEW repository: {repo_name}")
-        else:
+        elif scan_reason == "new_commits":
             logger.info(f"🔄 Scanning repository with NEW COMMITS: {repo_name}")
+        else:  # post_freeze_commits
+            logger.info(f"🔓 Scanning repository after FREEZE PERIOD: {repo_name}")
         
         # Extract owner and repo name from full name
         if "/" not in repo_name:
@@ -330,7 +427,12 @@ async def scan_repository_with_notifications(repo_id: str, user_email: str, acce
                             continue
         
         # Create report
-        scan_type = "automatic_new_repo" if scan_reason == "new_repository" else "automatic_commit"
+        if scan_reason == "new_repository":
+            scan_type = "automatic_new_repo"
+        elif scan_reason == "post_freeze_commits":
+            scan_type = "automatic_post_freeze"
+        else:
+            scan_type = "automatic_commit"
         
         report = await crud.create_report(
             user_email=user_email,
@@ -353,14 +455,23 @@ async def scan_repository_with_notifications(repo_id: str, user_email: str, acce
                     await email_service.send_no_findings_alert(user_email, repo_name, str(report["_id"]))
                     logger.info(f"📧 NEW REPO no-findings alert sent to {user_email}")
             
+            elif scan_reason == "post_freeze_commits":
+                # Email for POST-FREEZE commits (multiple commits batched)
+                if all_findings:
+                    subject = f"🔓 BATCH COMMIT ALERT: {repo_name} - {len(all_findings)} secrets found!"
+                    await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
+                    logger.info(f"📧 POST-FREEZE security alert sent to {user_email}")
+                else:
+                    await email_service.send_commit_clean_alert(user_email, repo_name, str(report["_id"]))
+                    logger.info(f"📧 POST-FREEZE clean alert sent to {user_email}")
+            
             else:  # new_commits
-                # Email for UPDATED repository
+                # Email for regular commit
                 if all_findings:
                     subject = f"🔄 COMMIT ALERT: {repo_name} - {len(all_findings)} secrets in latest changes!"
                     await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
                     logger.info(f"📧 COMMIT security alert sent to {user_email}")
                 else:
-                    # Send clean commit notification
                     await email_service.send_commit_clean_alert(user_email, repo_name, str(report["_id"]))
                     logger.info(f"📧 COMMIT clean alert sent to {user_email}")
         
@@ -430,6 +541,21 @@ async def cleanup_old_scans():
         if result.modified_count > 0:
             logger.info(f"🔄 Reset {result.modified_count} failed scans")
         
+        # Clean up expired freezes (optional cleanup)
+        now = datetime.utcnow()
+        expired_freezes = await db.repositories.update_many(
+            {
+                "scan_frozen_until": {"$lt": now},
+                "commits_during_freeze": 0
+            },
+            {
+                "$unset": {"scan_frozen_until": ""}
+            }
+        )
+        
+        if expired_freezes.modified_count > 0:
+            logger.info(f"🔓 Cleaned up {expired_freezes.modified_count} expired freezes")
+        
         # Clean up old reports (older than 30 days)
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         
@@ -444,31 +570,31 @@ async def cleanup_old_scans():
         logger.error(f"💥 Cleanup error: {e}")
 
 def start_background_scheduler():
-    """Start background scheduler - 1 minute polling"""
+    """Start background scheduler - 30 SECOND polling with 15-minute freeze logic"""
     scheduler = AsyncIOScheduler()
     
-    # 🚀 Poll every 1 MINUTE
+    # 🚀 Poll every 30 SECONDS with freeze logic
     scheduler.add_job(
         poll_user_repos,
         "interval",
-        minutes=1,  # 1 MINUTE POLLING
-        id="poll_user_repos_1min",
+        seconds=30,  # 30 SECOND POLLING
+        id="poll_user_repos_with_freeze",
         max_instances=1,
         replace_existing=True
     )
     
-    # Clean up every 30 minutes
+    # Clean up every 15 minutes
     scheduler.add_job(
         cleanup_old_scans,
         "interval",
-        minutes=30,
+        minutes=15,
         id="cleanup_old_scans",
         max_instances=1,
         replace_existing=True
     )
     
     scheduler.start()
-    logger.info("🚀 Background scheduler started - 1 MINUTE polling!")
+    logger.info("🚀 Background scheduler started - 30 SECOND polling with 15-MINUTE FREEZE logic!")
     
     return scheduler
 
