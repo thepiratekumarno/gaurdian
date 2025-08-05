@@ -102,12 +102,20 @@ async def shutdown_event():
     logger.info("🔄 Application shut down successfully")
 
 @app.get("/", response_class=HTMLResponse)
-async def login_page(request: Request):
-    """Root page - shows login if not authenticated"""
+async def homepage(request: Request):
+    """Root page - shows marketing homepage if not authenticated, redirects to dashboard if authenticated"""
     user = auth.get_current_user(request)
     if user:
         return RedirectResponse(url="/dashboard")
-    return templates.TemplateResponse("login.html", {"request": request})
+    
+    # Serve the marketing homepage
+    try:
+        with open("index.html", "r", encoding="utf-8") as f:
+            content = f.read()
+        return HTMLResponse(content=content)
+    except FileNotFoundError:
+        # Fallback to login if index.html doesn't exist
+        return RedirectResponse(url="/login")
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page_get(request: Request):
