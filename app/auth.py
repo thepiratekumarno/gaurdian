@@ -23,7 +23,7 @@ class OAuthManager:
         self._register_providers()
 
     def _register_providers(self):
-        base_url = os.getenv("BASE_URL", "http://localhost:8000")
+        base_url = os.getenv("BASE_URL", "https://secretguardian.onrender.com")
 
         # GitHub OAuth
         self.oauth.register(
@@ -235,3 +235,4 @@ def logout_user(request: Request):
     """Clear user session"""
     request.session.clear()
     return {"message": "Logged out successfully"}
+
