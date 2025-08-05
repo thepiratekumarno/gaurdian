@@ -1,3 +1,4 @@
+
 import asyncio
 import httpx
 import os
@@ -6,6 +7,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bson import ObjectId
 import base64
+import hashlib
 
 # Import your app modules
 from . import crud, database, email_service, detector
@@ -14,14 +16,13 @@ logger = logging.getLogger(__name__)
 
 async def poll_user_repos():
     """
-    FIXED VERSION: 30-SECOND POLLING with EMAIL DEDUPLICATION
-    - Detects new repositories within 30 seconds
-    - Scans existing repos on FIRST commit, then freezes for 15 minutes
-    - After 15 minutes, scans ONCE if there were commits during freeze
-    - SENDS ONLY ONE EMAIL PER COMMIT/BATCH EVENT
+    ROBUST VERSION: 30-SECOND POLLING with ATOMIC LOCKING and EMAIL DEDUPLICATION
+    - Uses atomic database operations to prevent race conditions
+    - Implements distributed locking to prevent concurrent scans
+    - Guarantees only ONE email per commit/batch event
     """
     try:
-        logger.info("🚀 Starting 30-second polling with email deduplication...")
+        logger.info("🚀 Starting robust 30-second polling with atomic locking...")
         
         db = await database.get_database()
         
@@ -38,6 +39,7 @@ async def poll_user_repos():
         new_repos_found = 0
         repos_scanned = 0
         repos_frozen = 0
+        repos_locked = 0
         
         for user in users:
             try:
@@ -81,7 +83,7 @@ async def poll_user_repos():
                 repos = response.json()
                 logger.info(f"📊 Checking {len(repos)} repositories for user {user_email}")
                 
-                # Process each repository with freeze logic and email deduplication
+                # Process each repository with atomic locking and robust deduplication
                 for repo_data in repos:
                     try:
                         full_name = repo_data["full_name"]
@@ -104,10 +106,10 @@ async def poll_user_repos():
                         })
                         
                         if not existing_repo:
-                            # 🆕 NEW REPOSITORY DETECTED - Always scan immediately
+                            # 🆕 NEW REPOSITORY DETECTED - Always scan immediately with atomic lock
                             logger.info(f"🆕 NEW REPOSITORY: {full_name} for {user_email}")
                             
-                            # Add repository to database
+                            # Create repository document with atomic insert
                             repo_doc = {
                                 "user_email": user_email,
                                 "repository_name": full_name,
@@ -116,7 +118,7 @@ async def poll_user_repos():
                                 "added_at": datetime.utcnow(),
                                 "last_scan": None,
                                 "findings_count": 0,
-                                "scan_status": "pending",
+                                "scan_status": "scanning",  # Immediately lock
                                 "is_private": is_private,
                                 "auto_detected": True,
                                 "github_updated_at": datetime.fromisoformat(updated_at.replace('Z', '+00:00')),
@@ -124,45 +126,43 @@ async def poll_user_repos():
                                 "last_known_push": pushed_at,
                                 "scan_frozen_until": None,
                                 "commits_during_freeze": 0,
-                                # NEW FIELDS FOR EMAIL DEDUPLICATION
-                                "last_emailed_push": None,  # Track last commit we emailed about
-                                "last_email_sent_at": None,  # Track when we last sent email
-                                "email_batch_commits": []    # Track commits in current batch
+                                # Email deduplication fields
+                                "last_emailed_push": None,
+                                "last_email_sent_at": None,
+                                "email_batch_commits": [],
+                                # Atomic locking fields
+                                "scan_lock_id": generate_lock_id(),
+                                "scan_lock_expires": datetime.utcnow() + timedelta(minutes=10),
+                                "scan_worker_id": get_worker_id()
                             }
                             
-                            result = await db.repositories.insert_one(repo_doc)
-                            repo_id = str(result.inserted_id)
-                            logger.info(f"✅ Added new repository: {full_name} (ID: {repo_id})")
-                            new_repos_found += 1
-                            
-                            # 🚀 SCAN NEW REPOSITORY IMMEDIATELY
-                            success = await scan_repository_with_email_deduplication(
-                                repo_id, user_email, github_token, full_name, "new_repository", pushed_at
-                            )
-                            
-                            if success:
-                                # Set 15-minute freeze after first scan
-                                freeze_until = datetime.utcnow() + timedelta(minutes=15)
-                                await db.repositories.update_one(
-                                    {"_id": ObjectId(repo_id)},
-                                    {"$set": {"scan_frozen_until": freeze_until}}
+                            try:
+                                result = await db.repositories.insert_one(repo_doc)
+                                repo_id = str(result.inserted_id)
+                                logger.info(f"✅ Added new repository with lock: {full_name} (ID: {repo_id})")
+                                new_repos_found += 1
+                                
+                                # 🚀 SCAN NEW REPOSITORY IMMEDIATELY
+                                success = await scan_repository_with_atomic_lock(
+                                    repo_id, user_email, github_token, full_name, "new_repository", pushed_at
                                 )
-                                logger.info(f"✅ New repo scan completed, frozen until: {freeze_until}")
-                                repos_scanned += 1
-                            else:
-                                logger.error(f"❌ New repo scan failed: {full_name}")
+                                
+                                if success:
+                                    repos_scanned += 1
+                                else:
+                                    logger.error(f"❌ New repo scan failed: {full_name}")
+                                    
+                            except Exception as insert_error:
+                                logger.error(f"❌ Failed to insert new repository {full_name}: {insert_error}")
+                                continue
                         
                         else:
-                            # 🔄 EXISTING REPOSITORY - Apply 15-minute freeze logic with email deduplication
+                            # 🔄 EXISTING REPOSITORY - Apply atomic locking with email deduplication
                             repo_id = str(existing_repo["_id"])
                             last_known_push = existing_repo.get("last_known_push")
                             scan_frozen_until = existing_repo.get("scan_frozen_until")
                             commits_during_freeze = existing_repo.get("commits_during_freeze", 0)
-                            
-                            # NEW: Get email tracking fields
-                            last_emailed_push = existing_repo.get("last_emailed_push")
-                            last_email_sent_at = existing_repo.get("last_email_sent_at")
-                            email_batch_commits = existing_repo.get("email_batch_commits", [])
+                            current_scan_status = existing_repo.get("scan_status", "idle")
                             
                             # Check if there's a new commit
                             if pushed_at != last_known_push:
@@ -181,38 +181,36 @@ async def poll_user_repos():
                                         freeze_time = scan_frozen_until
                                 
                                 if freeze_time is None or now >= freeze_time:
-                                    # ✅ NOT FROZEN - Can scan now
-                                    logger.info(f"🚀 Scanning {full_name} - not frozen")
+                                    # ✅ NOT FROZEN - Try to acquire atomic lock for scanning
+                                    lock_acquired = await acquire_scan_lock(db, repo_id, full_name)
                                     
-                                    # Update repository with new push info
-                                    await db.repositories.update_one(
-                                        {"_id": existing_repo["_id"]},
-                                        {
-                                            "$set": {
-                                                "last_known_push": pushed_at,
-                                                "github_pushed_at": github_pushed_time,
-                                                "scan_status": "pending",
-                                                "commits_during_freeze": 0
-                                            }
-                                        }
-                                    )
-                                    
-                                    # 🚀 TRIGGER SCAN WITH EMAIL DEDUPLICATION
-                                    success = await scan_repository_with_email_deduplication(
-                                        repo_id, user_email, github_token, full_name, "new_commits", pushed_at
-                                    )
-                                    
-                                    if success:
-                                        # Set new 15-minute freeze
-                                        new_freeze_until = now + timedelta(minutes=15)
+                                    if lock_acquired:
+                                        logger.info(f"🔒 Acquired scan lock for {full_name}")
+                                        
+                                        # Update repository with new push info
                                         await db.repositories.update_one(
                                             {"_id": existing_repo["_id"]},
-                                            {"$set": {"scan_frozen_until": new_freeze_until}}
+                                            {
+                                                "$set": {
+                                                    "last_known_push": pushed_at,
+                                                    "github_pushed_at": github_pushed_time,
+                                                    "commits_during_freeze": 0
+                                                }
+                                            }
                                         )
-                                        logger.info(f"✅ Commit scan completed, frozen until: {new_freeze_until}")
-                                        repos_scanned += 1
+                                        
+                                        # 🚀 TRIGGER SCAN WITH ATOMIC LOCK
+                                        success = await scan_repository_with_atomic_lock(
+                                            repo_id, user_email, github_token, full_name, "new_commits", pushed_at
+                                        )
+                                        
+                                        if success:
+                                            repos_scanned += 1
+                                        else:
+                                            logger.error(f"❌ Commit scan failed: {full_name}")
                                     else:
-                                        logger.error(f"❌ Commit scan failed: {full_name}")
+                                        logger.info(f"🔒 Scan already in progress for {full_name}, skipping")
+                                        repos_locked += 1
                                 
                                 else:
                                     # ❄️ FROZEN - Just track the commit for later
@@ -220,6 +218,7 @@ async def poll_user_repos():
                                     logger.info(f"   Tracking commit for post-freeze scan")
                                     
                                     # Add commit to batch tracking
+                                    email_batch_commits = existing_repo.get("email_batch_commits", [])
                                     email_batch_commits.append({
                                         "pushed_at": pushed_at,
                                         "detected_at": now.isoformat()
@@ -252,29 +251,25 @@ async def poll_user_repos():
                                 # If freeze just expired and we had commits during freeze
                                 if (freeze_time and now >= freeze_time and
                                     commits_during_freeze > 0):
-                                    logger.info(f"🔓 Freeze expired for {full_name} with {commits_during_freeze} pending commits")
                                     
-                                    # 🚀 TRIGGER POST-FREEZE BATCH SCAN
-                                    success = await scan_repository_with_email_deduplication(
-                                        repo_id, user_email, github_token, full_name, "post_freeze_commits", pushed_at
-                                    )
+                                    # Try to acquire atomic lock for post-freeze scan
+                                    lock_acquired = await acquire_scan_lock(db, repo_id, full_name)
                                     
-                                    if success:
-                                        # Clear freeze and reset counters
-                                        await db.repositories.update_one(
-                                            {"_id": existing_repo["_id"]},
-                                            {
-                                                "$set": {
-                                                    "scan_frozen_until": None,
-                                                    "commits_during_freeze": 0,
-                                                    "email_batch_commits": []
-                                                }
-                                            }
+                                    if lock_acquired:
+                                        logger.info(f"🔓 Freeze expired for {full_name} with {commits_during_freeze} pending commits")
+                                        
+                                        # 🚀 TRIGGER POST-FREEZE BATCH SCAN
+                                        success = await scan_repository_with_atomic_lock(
+                                            repo_id, user_email, github_token, full_name, "post_freeze_commits", pushed_at
                                         )
-                                        logger.info(f"✅ Post-freeze scan completed for {full_name}")
-                                        repos_scanned += 1
+                                        
+                                        if success:
+                                            repos_scanned += 1
+                                        else:
+                                            logger.error(f"❌ Post-freeze scan failed: {full_name}")
                                     else:
-                                        logger.error(f"❌ Post-freeze scan failed: {full_name}")
+                                        logger.info(f"🔒 Post-freeze scan already in progress for {full_name}")
+                                        repos_locked += 1
                     
                     except Exception as repo_error:
                         logger.error(f"❌ Error processing repository {repo_data.get('full_name', 'unknown')}: {repo_error}")
@@ -285,34 +280,122 @@ async def poll_user_repos():
                 continue
         
         # Summary log
-        if new_repos_found > 0 or repos_scanned > 0 or repos_frozen > 0:
-            logger.info(f"🎯 30-second polling with email deduplication completed:")
+        if new_repos_found > 0 or repos_scanned > 0 or repos_frozen > 0 or repos_locked > 0:
+            logger.info(f"🎯 Robust 30-second polling completed:")
             logger.info(f"   🆕 New repositories: {new_repos_found}")
             logger.info(f"   🚀 Repositories scanned: {repos_scanned}")
             logger.info(f"   ❄️ Repositories frozen: {repos_frozen}")
+            logger.info(f"   🔒 Repositories locked (skipped): {repos_locked}")
         else:
             logger.info("🔄 30-second polling completed - no changes detected")
     
     except Exception as e:
-        logger.error(f"💥 Critical error in 30-second polling: {e}")
+        logger.error(f"💥 Critical error in robust 30-second polling: {e}")
 
 
-async def scan_repository_with_email_deduplication(
+async def acquire_scan_lock(db, repo_id: str, repo_name: str) -> bool:
+    """
+    ATOMIC LOCK ACQUISITION - prevents concurrent scans of same repository
+    Returns True if lock acquired, False if already locked
+    """
+    try:
+        now = datetime.utcnow()
+        lock_id = generate_lock_id()
+        worker_id = get_worker_id()
+        
+        # Atomic update: only set lock if no active lock exists or expired lock exists
+        result = await db.repositories.update_one(
+            {
+                "_id": ObjectId(repo_id),
+                "$or": [
+                    {"scan_status": {"$ne": "scanning"}},  # Not currently scanning
+                    {"scan_lock_expires": {"$lt": now}},   # Or lock expired
+                    {"scan_lock_expires": {"$exists": False}}  # Or no lock set
+                ]
+            },
+            {
+                "$set": {
+                    "scan_status": "scanning",
+                    "scan_lock_id": lock_id,
+                    "scan_lock_expires": now + timedelta(minutes=10),  # 10-minute timeout
+                    "scan_worker_id": worker_id,
+                    "scan_started_at": now
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.info(f"🔒 Successfully acquired atomic lock for {repo_name} (Lock ID: {lock_id[:8]})")
+            return True
+        else:
+            logger.info(f"🔒 Failed to acquire lock for {repo_name} - already locked or scanning")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Error acquiring scan lock for {repo_name}: {e}")
+        return False
+
+
+async def release_scan_lock(db, repo_id: str, repo_name: str, lock_id: str):
+    """
+    Release atomic scan lock after completion
+    """
+    try:
+        result = await db.repositories.update_one(
+            {
+                "_id": ObjectId(repo_id),
+                "scan_lock_id": lock_id  # Only release if we own the lock
+            },
+            {
+                "$set": {
+                    "scan_status": "completed",
+                    "last_scan": datetime.utcnow()
+                },
+                "$unset": {
+                    "scan_lock_id": "",
+                    "scan_lock_expires": "",
+                    "scan_worker_id": "",
+                    "scan_started_at": ""
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            logger.info(f"🔓 Released atomic lock for {repo_name}")
+        else:
+            logger.warning(f"⚠️ Failed to release lock for {repo_name} - lock may have been taken by another worker")
+            
+    except Exception as e:
+        logger.error(f"❌ Error releasing scan lock for {repo_name}: {e}")
+
+
+async def scan_repository_with_atomic_lock(
     repo_id: str, user_email: str, access_token: str, repo_name: str, 
     scan_reason: str, current_push_timestamp: str
 ) -> bool:
     """
-    FIXED VERSION: Enhanced repository scanning with EMAIL DEDUPLICATION
-    - Only sends ONE email per commit/batch event
-    - Tracks last emailed commit to prevent duplicates
+    ROBUST VERSION: Enhanced repository scanning with ATOMIC LOCKING and EMAIL DEDUPLICATION
+    - Uses atomic database operations to prevent race conditions
+    - Only sends ONE email per commit/batch event with strict deduplication
+    - Automatically releases locks on completion or failure
     """
+    db = await database.get_database()
+    lock_id = None
+    
     try:
-        db = await database.get_database()
-        
-        # Get repository document to check email tracking
+        # Get repository document to check lock and email tracking
         repo_doc = await db.repositories.find_one({"_id": ObjectId(repo_id)})
         if not repo_doc:
             logger.error(f"❌ Repository {repo_id} not found")
+            return False
+        
+        # Verify we own the lock
+        lock_id = repo_doc.get("scan_lock_id")
+        worker_id = repo_doc.get("scan_worker_id")
+        current_worker = get_worker_id()
+        
+        if not lock_id or worker_id != current_worker:
+            logger.error(f"❌ Scan lock verification failed for {repo_name}")
             return False
         
         # CHECK EMAIL DEDUPLICATION - PREVENT DUPLICATE EMAILS
@@ -321,11 +404,13 @@ async def scan_repository_with_email_deduplication(
         
         # If we already emailed about this exact commit, skip email but still scan
         should_send_email = True
-        if last_emailed_push == current_push_timestamp:
-            logger.info(f"📧 SKIPPING EMAIL - Already notified about push {current_push_timestamp}")
-            should_send_email = False
+        email_skip_reason = None
         
-        # Also skip if we sent an email very recently (within 2 minutes) to prevent spam
+        if last_emailed_push == current_push_timestamp:
+            should_send_email = False
+            email_skip_reason = f"Already emailed about push {current_push_timestamp}"
+        
+        # Also skip if we sent an email very recently (within 3 minutes) to prevent spam
         if last_email_sent_at and should_send_email:
             if isinstance(last_email_sent_at, str):
                 last_email_time = datetime.fromisoformat(last_email_sent_at.replace('Z', '+00:00'))
@@ -333,19 +418,12 @@ async def scan_repository_with_email_deduplication(
                 last_email_time = last_email_sent_at
             
             time_since_last_email = datetime.utcnow() - last_email_time
-            if time_since_last_email < timedelta(minutes=2):
-                logger.info(f"📧 SKIPPING EMAIL - Recently sent email {time_since_last_email} ago")
+            if time_since_last_email < timedelta(minutes=3):
                 should_send_email = False
+                email_skip_reason = f"Recently sent email {time_since_last_email} ago"
         
-        # Update scan status to scanning
-        await db.repositories.update_one(
-            {"_id": ObjectId(repo_id)},
-            {"$set": {
-                "scan_status": "scanning",
-                "last_scan_started": datetime.utcnow(),
-                "scan_reason": scan_reason
-            }}
-        )
+        if not should_send_email:
+            logger.info(f"📧 SKIPPING EMAIL - {email_skip_reason}")
         
         if scan_reason == "new_repository":
             logger.info(f"🆕 Scanning NEW repository: {repo_name}")
@@ -357,7 +435,7 @@ async def scan_repository_with_email_deduplication(
         # Extract owner and repo name from full name
         if "/" not in repo_name:
             logger.error(f"❌ Invalid repository name format: {repo_name}")
-            await update_scan_status(repo_id, "failed", "Invalid repository name format")
+            await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         
         owner, repo_short_name = repo_name.split("/", 1)
@@ -376,17 +454,17 @@ async def scan_repository_with_email_deduplication(
         if response.status_code == 404:
             error_msg = f"Repository not found or access denied: {owner}/{repo_short_name}"
             logger.error(f"❌ {error_msg}")
-            await update_scan_status(repo_id, "failed", error_msg)
+            await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         elif response.status_code == 403:
             error_msg = f"Access forbidden - rate limited or insufficient permissions"
             logger.error(f"❌ {error_msg}")
-            await update_scan_status(repo_id, "failed", error_msg)
+            await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         elif response.status_code != 200:
             error_msg = f"Failed to get repository info: {response.status_code}"
             logger.error(f"❌ {error_msg}")
-            await update_scan_status(repo_id, "failed", error_msg)
+            await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         
         repo_info = response.json()
@@ -406,7 +484,7 @@ async def scan_repository_with_email_deduplication(
         elif response.status_code != 200:
             error_msg = f"Failed to get repository tree: {response.status_code}"
             logger.error(f"❌ {error_msg}")
-            await update_scan_status(repo_id, "failed", error_msg)
+            await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         else:
             tree_data = response.json()
@@ -485,97 +563,135 @@ async def scan_repository_with_email_deduplication(
         
         logger.info(f"📊 Scan completed: {repo_name} - {len(all_findings)} findings, {scanned_files_count} files")
         
-        # 📧 SEND EMAIL ONLY IF NOT ALREADY SENT FOR THIS COMMIT
+        # 📧 SEND EMAIL ONLY IF NOT ALREADY SENT FOR THIS COMMIT (ATOMIC EMAIL DEDUPLICATION)
         if should_send_email:
-            try:
-                if scan_reason == "new_repository":
-                    # Email for NEW repository
-                    if all_findings:
-                        subject = f"🆕 NEW REPO ALERT: {repo_name} - {len(all_findings)} secrets found!"
-                        await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
-                        logger.info(f"📧 NEW REPO security alert sent to {user_email}")
-                    else:
-                        await email_service.send_no_findings_alert(user_email, repo_name, str(report["_id"]))
-                        logger.info(f"📧 NEW REPO no-findings alert sent to {user_email}")
-                
-                elif scan_reason == "post_freeze_commits":
-                    # Email for POST-FREEZE commits (multiple commits batched)
-                    batch_commits = repo_doc.get("email_batch_commits", [])
-                    batch_count = len(batch_commits)
-                    
-                    if all_findings:
-                        subject = f"🔓 BATCH COMMIT ALERT: {repo_name} - {len(all_findings)} secrets in {batch_count} commits!"
-                        await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
-                        logger.info(f"📧 POST-FREEZE security alert sent to {user_email} for {batch_count} commits")
-                    else:
-                        await email_service.send_commit_clean_alert(user_email, repo_name, str(report["_id"]))
-                        logger.info(f"📧 POST-FREEZE clean alert sent to {user_email} for {batch_count} commits")
-                
-                else:  # new_commits
-                    # Email for regular commit
-                    if all_findings:
-                        subject = f"🔄 COMMIT ALERT: {repo_name} - {len(all_findings)} secrets in latest changes!"
-                        await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
-                        logger.info(f"📧 COMMIT security alert sent to {user_email}")
-                    else:
-                        await email_service.send_commit_clean_alert(user_email, repo_name, str(report["_id"]))
-                        logger.info(f"📧 COMMIT clean alert sent to {user_email}")
-                
-                # UPDATE EMAIL TRACKING TO PREVENT DUPLICATES
-                await db.repositories.update_one(
-                    {"_id": ObjectId(repo_id)},
-                    {"$set": {
+            # Double-check email deduplication with atomic update before sending
+            now = datetime.utcnow()
+            email_update_result = await db.repositories.update_one(
+                {
+                    "_id": ObjectId(repo_id),
+                    "$or": [
+                        {"last_emailed_push": {"$ne": current_push_timestamp}}, # Different commit
+                        {"last_emailed_push": {"$exists": False}}, # No previous email
+                        {"last_email_sent_at": {"$lt": now - timedelta(minutes=3)}} # Old email
+                    ]
+                },
+                {
+                    "$set": {
                         "last_emailed_push": current_push_timestamp,
-                        "last_email_sent_at": datetime.utcnow(),
-                        "email_batch_commits": []  # Clear batch after sending
-                    }}
-                )
-                logger.info(f"✅ Email tracking updated for {repo_name}")
+                        "last_email_sent_at": now,
+                        "email_batch_commits": []  # Clear batch after claiming
+                    }
+                }
+            )
             
-            except Exception as email_error:
-                logger.error(f"📧 Failed to send email: {email_error}")
+            if email_update_result.modified_count > 0:
+                # We successfully claimed the email sending right
+                try:
+                    if scan_reason == "new_repository":
+                        # Email for NEW repository
+                        if all_findings:
+                            subject = f"🆕 NEW REPO ALERT: {repo_name} - {len(all_findings)} secrets found!"
+                            await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
+                            logger.info(f"📧 NEW REPO security alert sent to {user_email}")
+                        else:
+                            await email_service.send_no_findings_alert(user_email, repo_name, str(report["_id"]))
+                            logger.info(f"📧 NEW REPO no-findings alert sent to {user_email}")
+                    
+                    elif scan_reason == "post_freeze_commits":
+                        # Email for POST-FREEZE commits (multiple commits batched)
+                        batch_commits = repo_doc.get("email_batch_commits", [])
+                        batch_count = len(batch_commits)
+                        
+                        if all_findings:
+                            subject = f"🔓 BATCH COMMIT ALERT: {repo_name} - {len(all_findings)} secrets in {batch_count} commits!"
+                            await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
+                            logger.info(f"📧 POST-FREEZE security alert sent to {user_email} for {batch_count} commits")
+                        else:
+                            await email_service.send_commit_clean_alert(user_email, repo_name, str(report["_id"]))
+                            logger.info(f"📧 POST-FREEZE clean alert sent to {user_email} for {batch_count} commits")
+                    
+                    else:  # new_commits
+                        # Email for regular commit
+                        if all_findings:
+                            subject = f"🔄 COMMIT ALERT: {repo_name} - {len(all_findings)} secrets in latest changes!"
+                            await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
+                            logger.info(f"📧 COMMIT security alert sent to {user_email}")
+                        else:
+                            await email_service.send_commit_clean_alert(user_email, repo_name, str(report["_id"]))
+                            logger.info(f"📧 COMMIT clean alert sent to {user_email}")
+                    
+                    logger.info(f"✅ Email sent and tracking updated atomically for {repo_name}")
+                
+                except Exception as email_error:
+                    logger.error(f"📧 Failed to send email: {email_error}")
+                    # Revert email tracking on failure
+                    await db.repositories.update_one(
+                        {"_id": ObjectId(repo_id)},
+                        {"$unset": {"last_emailed_push": "", "last_email_sent_at": ""}}
+                    )
+            else:
+                logger.info(f"📧 Email already sent by another worker for {repo_name} (atomic deduplication)")
         else:
-            logger.info(f"📧 Email skipped (already sent for this commit): {repo_name}")
+            logger.info(f"📧 Email skipped: {email_skip_reason}")
         
-        # Update scan completion status
+        # Set freeze period for future commits
+        if scan_reason in ["new_commits", "new_repository"]:
+            freeze_until = datetime.utcnow() + timedelta(minutes=15)
+            await db.repositories.update_one(
+                {"_id": ObjectId(repo_id)},
+                {"$set": {"scan_frozen_until": freeze_until}}
+            )
+            logger.info(f"✅ Scan completed, frozen until: {freeze_until}")
+        elif scan_reason == "post_freeze_commits":
+            # Clear freeze and reset counters
+            await db.repositories.update_one(
+                {"_id": ObjectId(repo_id)},
+                {
+                    "$set": {"scan_frozen_until": None, "commits_during_freeze": 0},
+                    "$unset": {"email_batch_commits": ""}
+                }
+            )
+            logger.info(f"✅ Post-freeze scan completed, freeze cleared for {repo_name}")
+        
+        # Update scan completion and findings count
         await db.repositories.update_one(
             {"_id": ObjectId(repo_id)},
-            {"$set": {
-                "scan_status": "completed",
-                "last_scan": datetime.utcnow(),
-                "findings_count": len(all_findings)
-            }}
+            {"$set": {"findings_count": len(all_findings)}}
         )
+        
+        # Release the atomic lock
+        await release_scan_lock(db, repo_id, repo_name, lock_id)
         
         return True
     
     except Exception as e:
-        logger.error(f"💥 Critical error in scan_repository_with_email_deduplication: {e}")
-        await update_scan_status(repo_id, "failed", str(e))
+        logger.error(f"💥 Critical error in scan_repository_with_atomic_lock: {e}")
+        
+        # Ensure lock is released on error
+        if lock_id:
+            await release_scan_lock(db, repo_id, repo_name, lock_id)
+        
         return False
 
 
-async def update_scan_status(repo_id: str, status: str, error_message: str = None):
-    """Helper function to update scan status"""
-    try:
-        db = await database.get_database()
-        update_data = {
-            "scan_status": status,
-            "last_scan": datetime.utcnow()
-        }
-        if error_message:
-            update_data["last_error"] = error_message
-        
-        await db.repositories.update_one(
-            {"_id": ObjectId(repo_id)},
-            {"$set": update_data}
-        )
-    except Exception as e:
-        logger.error(f"Error updating scan status: {e}")
+def generate_lock_id() -> str:
+    """Generate unique lock ID"""
+    import uuid
+    return str(uuid.uuid4())
+
+
+def get_worker_id() -> str:
+    """Get unique worker/process identifier"""
+    import socket
+    import os
+    hostname = socket.gethostname()
+    pid = os.getpid()
+    return f"{hostname}-{pid}"
 
 
 def start_background_scheduler():
-    """Start the background scheduler with email deduplication"""
+    """Start the background scheduler with robust atomic locking"""
     scheduler = AsyncIOScheduler()
     
     # Add the polling job every 30 seconds
@@ -585,20 +701,20 @@ def start_background_scheduler():
         seconds=30,
         id='poll_user_repos',
         replace_existing=True,
-        max_instances=1  # Prevent overlapping runs
+        max_instances=1  # Prevent overlapping scheduler runs
     )
     
-    # Add cleanup job every hour
+    # Add cleanup job every hour to clean expired locks
     scheduler.add_job(
-        cleanup_old_scans,
+        cleanup_expired_locks,
         'interval',
         hours=1,
-        id='cleanup_old_scans',
+        id='cleanup_expired_locks',
         replace_existing=True
     )
     
     scheduler.start()
-    logger.info("🚀 Background scheduler started - 30 SECOND polling with EMAIL DEDUPLICATION!")
+    logger.info("🚀 Background scheduler started - ROBUST 30-SECOND polling with ATOMIC LOCKING!")
     
     return scheduler
 
@@ -610,25 +726,44 @@ def stop_background_scheduler(scheduler):
         logger.info("🔄 Background scheduler stopped")
 
 
-async def cleanup_old_scans():
-    """Clean up old scan data and reset frozen repositories if needed"""
+async def cleanup_expired_locks():
+    """Clean up expired scan locks and reset frozen repositories"""
     try:
         db = await database.get_database()
         now = datetime.utcnow()
         
-        # Reset repositories that have been frozen for too long (over 1 hour)
-        one_hour_ago = now - timedelta(hours=1)
-        result = await db.repositories.update_many(
-            {"scan_frozen_until": {"$lt": one_hour_ago}},
-            {"$unset": {
-                "scan_frozen_until": "",
-                "commits_during_freeze": "",
-                "email_batch_commits": ""
-            }}
+        # Clean up expired scan locks
+        expired_locks_result = await db.repositories.update_many(
+            {"scan_lock_expires": {"$lt": now}},
+            {
+                "$set": {"scan_status": "completed"},
+                "$unset": {
+                    "scan_lock_id": "",
+                    "scan_lock_expires": "",
+                    "scan_worker_id": "",
+                    "scan_started_at": ""
+                }
+            }
         )
         
-        if result.modified_count > 0:
-            logger.info(f"🧹 Reset {result.modified_count} repositories from freeze state")
+        if expired_locks_result.modified_count > 0:
+            logger.info(f"🧹 Cleaned up {expired_locks_result.modified_count} expired scan locks")
+        
+        # Reset repositories that have been frozen for too long (over 2 hours)
+        two_hours_ago = now - timedelta(hours=2)
+        frozen_reset_result = await db.repositories.update_many(
+            {"scan_frozen_until": {"$lt": two_hours_ago}},
+            {
+                "$unset": {
+                    "scan_frozen_until": "",
+                    "commits_during_freeze": "",
+                    "email_batch_commits": ""
+                }
+            }
+        )
+        
+        if frozen_reset_result.modified_count > 0:
+            logger.info(f"🧹 Reset {frozen_reset_result.modified_count} repositories from long freeze state")
     
     except Exception as e:
-        logger.error(f"Error in cleanup_old_scans: {e}")
+        logger.error(f"Error in cleanup_expired_locks: {e}")
