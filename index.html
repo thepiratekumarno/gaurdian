@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secret Guardian - Protect Your Code</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+</head>
+
+<body>
+    <!-- Navigation -->
+    <nav class="homepage-navbar">
+        <div class="homepage-nav-container">
+            <div class="homepage-nav-brand">
+                <i class="fas fa-shield-alt"></i>
+                <span>Secret Guardian</span>
+            </div>
+            <div class="homepage-nav-menu">
+                <a href="/login" class="homepage-nav-login">
+                    <i class="fas fa-sign-in-alt"></i>
+                    Login
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="homepage-hero">
+        <div class="homepage-hero-bg">
+            <canvas id="hero-canvas"></canvas>
+        </div>
+        <div class="homepage-hero-content">
+            <div class="homepage-hero-text">
+                <h1 class="homepage-hero-title">
+                    Protect Your Code from
+                    <span class="homepage-gradient-text">Secret Leaks</span>
+                </h1>
+                <p class="homepage-hero-subtitle">
+                    Free AI-powered secret detection for GitHub repositories.
+                    Scan, monitor, and secure your codebase automatically.
+                </p>
+                <div class="homepage-hero-buttons">
+                    <a href="/login" class="homepage-btn homepage-btn-primary homepage-btn-lg">
+                        <i class="fas fa-rocket"></i>
+                        Start Free
+                    </a>
+                </div>
+                <div class="homepage-hero-stats">
+                    <div class="homepage-stat">
+                        <span class="homepage-stat-number">Free</span>
+                        <span class="homepage-stat-label">Always Free</span>
+                    </div>
+                    <div class="homepage-stat">
+                        <span class="homepage-stat-number">AI</span>
+                        <span class="homepage-stat-label">Powered Detection</span>
+                    </div>
+                    <div class="homepage-stat">
+                        <span class="homepage-stat-number">GitHub</span>
+                        <span class="homepage-stat-label">Integration</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="homepage-scroll-indicator">
+            <div class="homepage-scroll-arrow"></div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="homepage-features">
+        <div class="homepage-container">
+            <div class="homepage-section-header">
+                <h2>Security Features</h2>
+                <p>Comprehensive protection for your development workflow</p>
+            </div>
+            <div class="homepage-features-grid">
+                <div class="homepage-feature-card">
+                    <div class="homepage-feature-icon">
+                        <i class="fas fa-search"></i>
+                    </div>
+                    <h3>AI-Powered Detection</h3>
+                    <p>Advanced algorithms detect secrets with high accuracy across 100+ secret types.</p>
+                </div>
+                <div class="homepage-feature-card">
+                    <div class="homepage-feature-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <h3>Real-time Monitoring</h3>
+                    <p>Instant alerts for new commits and repository changes with automatic scanning.</p>
+                </div>
+                <div class="homepage-feature-card">
+                    <div class="homepage-feature-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3>Free Security</h3>
+                    <p>Complete security scanning at no cost - protect your repositories without limits.</p>
+                </div>
+                <div class="homepage-feature-card">
+                    <div class="homepage-feature-icon">
+                        <i class="fas fa-code-branch"></i>
+                    </div>
+                    <h3>GitHub Integration</h3>
+                    <p>Seamless integration with GitHub repositories and webhooks for automated workflows.</p>
+                </div>
+                <div class="homepage-feature-card">
+                    <div class="homepage-feature-icon">
+                        <i class="fas fa-bell"></i>
+                    </div>
+                    <h3>Email Notifications</h3>
+                    <p>Get notified instantly when security issues are detected in your code.</p>
+                </div>
+                <div class="homepage-feature-card">
+                    <div class="homepage-feature-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3>Detailed Reports</h3>
+                    <p>Comprehensive reporting with detailed findings and security recommendations.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section id="how-it-works" class="homepage-how-it-works">
+        <div class="homepage-container">
+            <div class="homepage-section-header">
+                <h2>How It Works</h2>
+                <p>Get started in minutes with our simple 3-step process</p>
+            </div>
+            <div class="homepage-steps">
+                <div class="homepage-step">
+                    <div class="homepage-step-number">1</div>
+                    <div class="homepage-step-content">
+                        <h3>Connect GitHub</h3>
+                        <p>Link your GitHub account and select repositories to monitor</p>
+                    </div>
+                </div>
+                <div class="homepage-step">
+                    <div class="homepage-step-number">2</div>
+                    <div class="homepage-step-content">
+                        <h3>Automatic Scanning</h3>
+                        <p>Our AI scans your code for secrets and vulnerabilities</p>
+                    </div>
+                </div>
+                <div class="homepage-step">
+                    <div class="homepage-step-number">3</div>
+                    <div class="homepage-step-content">
+                        <h3>Get Alerts</h3>
+                        <p>Receive instant notifications and detailed security reports</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="homepage-cta">
+        <div class="homepage-container">
+            <div class="homepage-cta-content">
+                <h2>Ready to Secure Your Code?</h2>
+                <p>Start protecting your repositories for free - no credit card required</p>
+                <a href="/login" class="homepage-btn homepage-btn-primary homepage-btn-lg">
+                    <i class="fas fa-shield-alt"></i>
+                    Start Free Now
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="homepage-footer">
+        <div class="homepage-container">
+            <div class="homepage-footer-content">
+                <div class="homepage-footer-brand">
+                    <div class="homepage-nav-brand">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Secret Guardian</span>
+                    </div>
+                    <p>Protecting your code, securing your future.</p>
+                </div>
+            </div>
+            <div class="homepage-footer-bottom">
+                <p>&copy; 2024 Secret Guardian. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/static/main.js"></script>
+</body>
+
+</html>
