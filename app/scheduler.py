@@ -10,7 +10,7 @@ import base64
 import hashlib
 
 # Import your app modules
-from . import crud, database, email_service, detector
+from . import crud, database, email_service as email_service, detector
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def should_skip_directory(dir_path: str) -> bool:
         'logs', 'log', 'tmp', 'temp', '.tmp', '.temp', 'uploads', 'downloads',
         '.vscode', '.idea', '.vs', 'bin', 'obj', 'packages', 'bower_components',
         '.next', '.nuxt', 'out', 'public/assets', 'static/assets', 'assets/vendor',
-        'venv', 'env', '.env', 'virtualenv', '.virtualenv', 'conda-meta',
+        'venv','virtualenv', '.virtualenv', 'conda-meta',
         'site-packages', 'Lib/site-packages', '.tox', '.nox', 'htmlcov'
     ]
     
@@ -93,16 +93,127 @@ def is_large_file(file_size: int) -> bool:
     """Check if file is too large to scan (over 500KB)"""
     return file_size > 500 * 1024  # 500KB limit
 
-async def poll_user_repos():
+async def discover_user_repositories(user_email: str, github_token: str, is_new_user: bool = False):
     """
-    OPTIMIZED VERSION: 30-SECOND POLLING with SMART FILTERING and ATOMIC LOCKING
-    - Skips dependency folders and binary files
-    - Only scans relevant source code and config files
-    - Uses atomic database operations to prevent race conditions
-    - Guarantees only ONE email per commit/batch event
+    Discover and store user repositories WITHOUT automatically scanning them
+    For new users, just fetch and store repo info, don't trigger scans
     """
     try:
-        logger.info("🚀 Starting optimized 30-second polling with smart filtering...")
+        db = await database.get_database()
+        
+        headers = {
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "SecretGuardian/1.0"
+        }
+        
+        # Get user's repositories
+        url = "https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc"
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"❌ Failed to fetch repos for {user_email}: {response.status_code}")
+            return 0
+        
+        repos = response.json()
+        new_repos_added = 0
+        
+        for repo_data in repos:
+            try:
+                full_name = repo_data["full_name"]
+                html_url = repo_data["html_url"]
+                is_private = repo_data.get("private", False)
+                updated_at = repo_data.get("updated_at")
+                pushed_at = repo_data.get("pushed_at")
+                
+                # Skip if no pushed_at (empty repo)
+                if not pushed_at:
+                    continue
+                
+                # Parse GitHub's pushed_at timestamp
+                github_pushed_time = datetime.fromisoformat(pushed_at.replace('Z', '+00:00'))
+                
+                # Check if this repository already exists in our database
+                existing_repo = await db.repositories.find_one({
+                    "user_email": user_email,
+                    "repository_name": full_name
+                })
+                
+                if not existing_repo:
+                    # Add new repository WITHOUT scanning it automatically
+                    repo_doc = {
+                        "user_email": user_email,
+                        "repository_name": full_name,
+                        "repository_url": html_url,
+                        "is_monitored": True,
+                        "added_at": datetime.utcnow(),
+                        "last_scan": None,
+                        "findings_count": 0,
+                        "scan_status": "idle",  # Don't scan automatically
+                        "is_private": is_private,
+                        "auto_detected": True,
+                        "github_updated_at": datetime.fromisoformat(updated_at.replace('Z', '+00:00')),
+                        "github_pushed_at": github_pushed_time,
+                        "last_known_push": pushed_at,
+                        "scan_frozen_until": None,
+                        "commits_during_freeze": 0,
+                        # Email deduplication fields
+                        "last_emailed_push": None,
+                        "last_email_sent_at": None,
+                        "email_batch_commits": [],
+                        # Mark as discovered for new user (not to be auto-scanned)
+                        "discovered_for_new_user": is_new_user,
+                        "initial_discovery": is_new_user
+                    }
+                    
+                    try:
+                        result = await db.repositories.insert_one(repo_doc)
+                        logger.info(f"📋 Discovered repository: {full_name} (not auto-scanned)")
+                        new_repos_added += 1
+                    except Exception as insert_error:
+                        logger.error(f"❌ Failed to insert discovered repository {full_name}: {insert_error}")
+                        continue
+            
+            except Exception as repo_error:
+                logger.error(f"❌ Error processing repository discovery {repo_data.get('full_name', 'unknown')}: {repo_error}")
+                continue
+        
+        # Send welcome email for new users
+        if is_new_user and new_repos_added > 0:
+            # Get username from GitHub API
+            user_info_url = "https://api.github.com/user"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                user_response = await client.get(user_info_url, headers=headers)
+            
+            username = user_email.split('@')[0]  # fallback
+            if user_response.status_code == 200:
+                user_info = user_response.json()
+                username = user_info.get('login', username)
+            
+            await email_service.send_welcome_email_for_new_user(
+                user_email=user_email,
+                username=username,
+                repos_count=new_repos_added
+            )
+        
+        logger.info(f"📋 Repository discovery completed for {user_email}: {new_repos_added} new repositories found")
+        return new_repos_added
+        
+    except Exception as e:
+        logger.error(f"❌ Error in discover_user_repositories: {e}")
+        return 0
+
+async def poll_user_repos():
+    """
+    FINAL VERSION: Monitor repositories for changes WITHOUT auto-scanning new user repos
+    - Discovers new repositories for new users without scanning
+    - Only scans when there are actual commits/changes
+    - Uses secure email notifications with URLs only
+    """
+    try:
+        logger.info("🚀 Starting repository monitoring (no auto-scan for new users)...")
         
         db = await database.get_database()
         
@@ -116,7 +227,7 @@ async def poll_user_repos():
             return
         
         logger.info(f"👥 Found {len(users)} users with GitHub tokens")
-        new_repos_found = 0
+        new_repos_discovered = 0
         repos_scanned = 0
         repos_frozen = 0
         repos_locked = 0
@@ -132,7 +243,21 @@ async def poll_user_repos():
                 
                 logger.info(f"🔍 Checking repos for user: {user_email}")
                 
-                # Fetch user's repositories from GitHub API
+                # Check if this is a new user (no repositories in our database yet)
+                existing_repos_count = await db.repositories.count_documents({
+                    "user_email": user_email
+                })
+                
+                is_new_user = existing_repos_count == 0
+                
+                if is_new_user:
+                    # NEW USER: Just discover repositories, don't scan them
+                    logger.info(f"🆕 New user detected: {user_email} - discovering repositories without scanning")
+                    discovered = await discover_user_repositories(user_email, github_token, is_new_user=True)
+                    new_repos_discovered += discovered
+                    continue  # Skip to next user, don't process for scanning
+                
+                # EXISTING USER: Check for changes and scan when needed
                 headers = {
                     "Authorization": f"Bearer {github_token}",
                     "Accept": "application/vnd.github+json",
@@ -163,7 +288,7 @@ async def poll_user_repos():
                 repos = response.json()
                 logger.info(f"📊 Checking {len(repos)} repositories for user {user_email}")
                 
-                # Process each repository with optimized scanning and atomic locking
+                # Process each repository
                 for repo_data in repos:
                     try:
                         full_name = repo_data["full_name"]
@@ -186,8 +311,8 @@ async def poll_user_repos():
                         })
                         
                         if not existing_repo:
-                            # 🆕 NEW REPOSITORY DETECTED - Always scan immediately with atomic lock
-                            logger.info(f"🆕 NEW REPOSITORY: {full_name} for {user_email}")
+                            # 🆕 NEW REPOSITORY for existing user - Add and scan
+                            logger.info(f"🆕 NEW REPOSITORY: {full_name} for existing user {user_email}")
                             
                             # Create repository document with atomic insert
                             repo_doc = {
@@ -198,7 +323,7 @@ async def poll_user_repos():
                                 "added_at": datetime.utcnow(),
                                 "last_scan": None,
                                 "findings_count": 0,
-                                "scan_status": "scanning",  # Immediately lock
+                                "scan_status": "scanning",  # Immediately lock for scanning
                                 "is_private": is_private,
                                 "auto_detected": True,
                                 "github_updated_at": datetime.fromisoformat(updated_at.replace('Z', '+00:00')),
@@ -213,17 +338,20 @@ async def poll_user_repos():
                                 # Atomic locking fields
                                 "scan_lock_id": generate_lock_id(),
                                 "scan_lock_expires": datetime.utcnow() + timedelta(minutes=10),
-                                "scan_worker_id": get_worker_id()
+                                "scan_worker_id": get_worker_id(),
+                                # Not marked as initial discovery for existing users
+                                "discovered_for_new_user": False,
+                                "initial_discovery": False
                             }
                             
                             try:
                                 result = await db.repositories.insert_one(repo_doc)
                                 repo_id = str(result.inserted_id)
-                                logger.info(f"✅ Added new repository with lock: {full_name} (ID: {repo_id})")
-                                new_repos_found += 1
+                                logger.info(f"✅ Added new repository for existing user: {full_name}")
+                                new_repos_discovered += 1
                                 
-                                # 🚀 SCAN NEW REPOSITORY IMMEDIATELY
-                                success = await scan_repository_optimized(
+                                # 🚀 SCAN NEW REPOSITORY (for existing users only)
+                                success = await scan_repository_secure(
                                     repo_id, user_email, github_token, full_name, "new_repository", pushed_at
                                 )
                                 
@@ -237,11 +365,18 @@ async def poll_user_repos():
                                 continue
                         
                         else:
-                            # 🔄 EXISTING REPOSITORY - Apply atomic locking with email deduplication
+                            # 🔄 EXISTING REPOSITORY - Check for changes
                             repo_id = str(existing_repo["_id"])
                             last_known_push = existing_repo.get("last_known_push")
                             scan_frozen_until = existing_repo.get("scan_frozen_until")
                             commits_during_freeze = existing_repo.get("commits_during_freeze", 0)
+                            was_discovered_for_new_user = existing_repo.get("discovered_for_new_user", False)
+                            
+                            # Skip auto-scanning repositories that were discovered for new users
+                            # They can only be scanned manually or when user makes new commits
+                            if was_discovered_for_new_user and pushed_at == last_known_push:
+                                # No new commits since discovery, skip auto-scan
+                                continue
                             
                             # Check if there's a new commit
                             if pushed_at != last_known_push:
@@ -271,13 +406,14 @@ async def poll_user_repos():
                                                 "$set": {
                                                     "last_known_push": pushed_at,
                                                     "github_pushed_at": github_pushed_time,
-                                                    "commits_during_freeze": 0
+                                                    "commits_during_freeze": 0,
+                                                    "discovered_for_new_user": False  # Clear flag on activity
                                                 }
                                             }
                                         )
                                         
-                                        # 🚀 TRIGGER OPTIMIZED SCAN WITH ATOMIC LOCK
-                                        success = await scan_repository_optimized(
+                                        # 🚀 TRIGGER SECURE SCAN WITH ATOMIC LOCK
+                                        success = await scan_repository_secure(
                                             repo_id, user_email, github_token, full_name, "new_commits", pushed_at
                                         )
                                         
@@ -308,7 +444,8 @@ async def poll_user_repos():
                                                 "last_known_push": pushed_at,
                                                 "github_pushed_at": github_pushed_time,
                                                 "commits_during_freeze": commits_during_freeze + 1,
-                                                "email_batch_commits": email_batch_commits
+                                                "email_batch_commits": email_batch_commits,
+                                                "discovered_for_new_user": False  # Clear flag on activity
                                             }
                                         }
                                     )
@@ -334,8 +471,8 @@ async def poll_user_repos():
                                     if lock_acquired:
                                         logger.info(f"🔓 Freeze expired for {full_name} with {commits_during_freeze} pending commits")
                                         
-                                        # 🚀 TRIGGER POST-FREEZE OPTIMIZED SCAN
-                                        success = await scan_repository_optimized(
+                                        # 🚀 TRIGGER POST-FREEZE SECURE SCAN
+                                        success = await scan_repository_secure(
                                             repo_id, user_email, github_token, full_name, "post_freeze_commits", pushed_at
                                         )
                                         
@@ -352,28 +489,21 @@ async def poll_user_repos():
                         continue
             
             except Exception as user_error:
-                logger.error(f"❌ Error polling repos for user {user.get('email', 'unknown')}: {user_error}")
+                logger.error(f"❌ Error monitoring repos for user {user.get('email', 'unknown')}: {user_error}")
                 continue
         
         # Summary log
-        if new_repos_found > 0 or repos_scanned > 0 or repos_frozen > 0 or repos_locked > 0:
-            logger.info(f"🎯 Optimized 30-second polling completed:")
-            logger.info(f"   🆕 New repositories: {new_repos_found}")
-            logger.info(f"   🚀 Repositories scanned: {repos_scanned}")
-            logger.info(f"   ❄️ Repositories frozen: {repos_frozen}")
-            logger.info(f"   🔒 Repositories locked (skipped): {repos_locked}")
-        else:
-            logger.info("🔄 30-second polling completed - no changes detected")
+        logger.info(f"🎯 Repository monitoring completed:")
+        logger.info(f"   📋 New repositories discovered: {new_repos_discovered}")
+        logger.info(f"   🚀 Repositories scanned: {repos_scanned}")
+        logger.info(f"   ❄️ Repositories frozen: {repos_frozen}")
+        logger.info(f"   🔒 Repositories locked (skipped): {repos_locked}")
     
     except Exception as e:
-        logger.error(f"💥 Critical error in optimized 30-second polling: {e}")
-
+        logger.error(f"💥 Critical error in repository monitoring: {e}")
 
 async def acquire_scan_lock(db, repo_id: str, repo_name: str) -> bool:
-    """
-    ATOMIC LOCK ACQUISITION - prevents concurrent scans of same repository
-    Returns True if lock acquired, False if already locked
-    """
+    """ATOMIC LOCK ACQUISITION - prevents concurrent scans of same repository"""
     try:
         now = datetime.utcnow()
         lock_id = generate_lock_id()
@@ -411,7 +541,6 @@ async def acquire_scan_lock(db, repo_id: str, repo_name: str) -> bool:
         logger.error(f"❌ Error acquiring scan lock for {repo_name}: {e}")
         return False
 
-
 async def release_scan_lock(db, repo_id: str, repo_name: str, lock_id: str):
     """Release atomic scan lock after completion"""
     try:
@@ -442,17 +571,12 @@ async def release_scan_lock(db, repo_id: str, repo_name: str, lock_id: str):
     except Exception as e:
         logger.error(f"❌ Error releasing scan lock for {repo_name}: {e}")
 
-
-async def scan_repository_optimized(
+async def scan_repository_secure(
     repo_id: str, user_email: str, access_token: str, repo_name: str, 
     scan_reason: str, current_push_timestamp: str
 ) -> bool:
     """
-    OPTIMIZED VERSION: Repository scanning with SMART FILTERING and ATOMIC LOCKING
-    - Skips dependency folders (node_modules, vendor, etc.)
-    - Only scans relevant source code and config files
-    - Skips binary files and large files
-    - Uses atomic database operations for email deduplication
+    SECURE VERSION: Repository scanning with smart filtering and secure email notifications
     """
     db = await database.get_database()
     lock_id = None
@@ -499,7 +623,7 @@ async def scan_repository_optimized(
         if not should_send_email:
             logger.info(f"📧 SKIPPING EMAIL - {email_skip_reason}")
         
-        logger.info(f"🔍 Starting optimized scan: {repo_name} ({scan_reason})")
+        logger.info(f"🔍 Starting secure scan: {repo_name} ({scan_reason})")
         
         # Extract owner and repo name from full name
         if "/" not in repo_name:
@@ -521,18 +645,15 @@ async def scan_repository_optimized(
             response = await client.get(repo_info_url, headers=headers)
         
         if response.status_code == 404:
-            error_msg = f"Repository not found: {owner}/{repo_short_name}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"❌ Repository not found: {owner}/{repo_short_name}")
             await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         elif response.status_code == 403:
-            error_msg = f"Access forbidden - rate limited"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"❌ Access forbidden - rate limited")
             await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         elif response.status_code != 200:
-            error_msg = f"Failed to get repository info: {response.status_code}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"❌ Failed to get repository info: {response.status_code}")
             await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         
@@ -552,14 +673,13 @@ async def scan_repository_optimized(
             scanned_files_count = 0
             skipped_files_count = 0
         elif response.status_code != 200:
-            error_msg = f"Failed to get repository tree: {response.status_code}"
-            logger.error(f"❌ {error_msg}")
+            logger.error(f"❌ Failed to get repository tree: {response.status_code}")
             await release_scan_lock(db, repo_id, repo_name, lock_id)
             return False
         else:
             tree_data = response.json()
             
-            # OPTIMIZED FILE SCANNING with smart filtering
+            # SMART FILE SCANNING with filtering
             all_findings = []
             scanned_files_count = 0
             skipped_files_count = 0
@@ -645,12 +765,12 @@ async def scan_repository_optimized(
             scan_type=scan_type
         )
         
-        logger.info(f"📊 Optimized scan completed: {repo_name}")
+        logger.info(f"📊 Secure scan completed: {repo_name}")
         logger.info(f"   🔍 Files scanned: {scanned_files_count}")
         logger.info(f"   ⏭️ Files skipped: {skipped_files_count}")
         logger.info(f"   🚨 Findings: {len(all_findings)}")
         
-        # 📧 SEND EMAIL ONLY IF NOT ALREADY SENT (ATOMIC EMAIL DEDUPLICATION)
+        # 📧 SEND SECURE EMAIL WITH URL ONLY
         if should_send_email:
             # Double-check email deduplication with atomic update before sending
             now = datetime.utcnow()
@@ -675,40 +795,27 @@ async def scan_repository_optimized(
             if email_update_result.modified_count > 0:
                 # We successfully claimed the email sending right
                 try:
-                    if scan_reason == "new_repository":
-                        if all_findings:
-                            subject = f"🆕 NEW REPO ALERT: {repo_name} - {len(all_findings)} secrets found!"
-                            await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
-                            logger.info(f"📧 NEW REPO security alert sent to {user_email}")
-                        else:
-                            await email_service.send_no_findings_alert(user_email, repo_name, str(report["_id"]))
-                            logger.info(f"📧 NEW REPO no-findings alert sent to {user_email}")
+                    # Use secure email service with URL-only notifications
+                    success = await email_service.send_security_alert_with_url(
+                        user_email=user_email,
+                        repository_name=repo_name,
+                        findings_count=len(all_findings),
+                        report_id=str(report["_id"]),
+                        scan_type=scan_reason
+                    )
                     
-                    elif scan_reason == "post_freeze_commits":
-                        batch_commits = repo_doc.get("email_batch_commits", [])
-                        batch_count = len(batch_commits)
-                        
-                        if all_findings:
-                            subject = f"🔓 BATCH COMMIT ALERT: {repo_name} - {len(all_findings)} secrets in {batch_count} commits!"
-                            await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
-                            logger.info(f"📧 POST-FREEZE security alert sent to {user_email}")
-                        else:
-                            await email_service.send_commit_clean_alert(user_email, repo_name, str(report["_id"]))
-                            logger.info(f"📧 POST-FREEZE clean alert sent to {user_email}")
-                    
-                    else:  # new_commits
-                        if all_findings:
-                            subject = f"🔄 COMMIT ALERT: {repo_name} - {len(all_findings)} secrets in latest changes!"
-                            await email_service.send_security_alert(user_email, subject, all_findings, str(report["_id"]))
-                            logger.info(f"📧 COMMIT security alert sent to {user_email}")
-                        else:
-                            await email_service.send_commit_clean_alert(user_email, repo_name, str(report["_id"]))
-                            logger.info(f"📧 COMMIT clean alert sent to {user_email}")
-                    
-                    logger.info(f"✅ Email sent and tracking updated atomically for {repo_name}")
+                    if success:
+                        logger.info(f"📧 Secure email notification sent to {user_email} for {repo_name}")
+                    else:
+                        logger.error(f"❌ Failed to send secure email notification")
+                        # Revert email tracking on failure
+                        await db.repositories.update_one(
+                            {"_id": ObjectId(repo_id)},
+                            {"$unset": {"last_emailed_push": "", "last_email_sent_at": ""}}
+                        )
                 
                 except Exception as email_error:
-                    logger.error(f"📧 Failed to send email: {email_error}")
+                    logger.error(f"📧 Failed to send secure email: {email_error}")
                     # Revert email tracking on failure
                     await db.repositories.update_one(
                         {"_id": ObjectId(repo_id)},
@@ -750,7 +857,7 @@ async def scan_repository_optimized(
         return True
     
     except Exception as e:
-        logger.error(f"💥 Critical error in optimized scan: {e}")
+        logger.error(f"💥 Critical error in secure scan: {e}")
         
         # Ensure lock is released on error
         if lock_id:
@@ -758,12 +865,10 @@ async def scan_repository_optimized(
         
         return False
 
-
 def generate_lock_id() -> str:
     """Generate unique lock ID"""
     import uuid
     return str(uuid.uuid4())
-
 
 def get_worker_id() -> str:
     """Get unique worker/process identifier"""
@@ -773,12 +878,11 @@ def get_worker_id() -> str:
     pid = os.getpid()
     return f"{hostname}-{pid}"
 
-
 def start_background_scheduler():
-    """Start the background scheduler with optimized scanning"""
+    """Start the background scheduler with secure scanning and no auto-scan for new users"""
     scheduler = AsyncIOScheduler()
     
-    # Add the polling job every 45 seconds (increased from 30 to reduce overlap)
+    # Add the polling job every 45 seconds
     scheduler.add_job(
         poll_user_repos,
         'interval',
@@ -798,17 +902,15 @@ def start_background_scheduler():
     )
     
     scheduler.start()
-    logger.info("🚀 Background scheduler started - OPTIMIZED 45-SECOND polling with SMART FILTERING!")
+    logger.info("🚀 Background scheduler started - SECURE MODE (no auto-scan for new users)!")
     
     return scheduler
-
 
 def stop_background_scheduler(scheduler):
     """Stop the background scheduler"""
     if scheduler:
         scheduler.shutdown()
         logger.info("🔄 Background scheduler stopped")
-
 
 async def cleanup_expired_locks():
     """Clean up expired scan locks and reset frozen repositories"""
