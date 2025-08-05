@@ -44,7 +44,7 @@ async def close_mongo_connection():
         db.client.close()
 
 async def create_indexes():
-    """Create database indexes for better performance - ROBUST VERSION with atomic locking"""
+    """Create database indexes for better performance - FINAL VERSION"""
     try:
         # Users collection indexes
         await db.database.users.create_index("email", unique=True)
@@ -55,14 +55,19 @@ async def create_indexes():
         await db.database.reports.create_index("user_email")
         await db.database.reports.create_index("created_at")
         await db.database.reports.create_index("repository_name")
+        await db.database.reports.create_index("_id")  # For report URL access
         
-        # Repositories collection indexes - ENHANCED FOR ATOMIC LOCKING AND EMAIL DEDUPLICATION
+        # Repositories collection indexes - FINAL VERSION with new user tracking
         await db.database.repositories.create_index("user_email")
         await db.database.repositories.create_index("repository_name")
         await db.database.repositories.create_index("last_known_push")  # For commit tracking
         await db.database.repositories.create_index("scan_frozen_until")  # For freeze logic
         await db.database.repositories.create_index("last_emailed_push")  # For email deduplication
         await db.database.repositories.create_index("last_email_sent_at")  # For email timing
+        
+        # New user tracking indexes
+        await db.database.repositories.create_index("discovered_for_new_user")  # For new user repo discovery
+        await db.database.repositories.create_index("initial_discovery")  # For initial discovery tracking
         
         # ATOMIC LOCKING INDEXES
         await db.database.repositories.create_index("scan_status")  # For scan status queries
@@ -83,6 +88,13 @@ async def create_indexes():
             ("last_emailed_push", 1)
         ])
         
+        # Compound index for new user discovery
+        await db.database.repositories.create_index([
+            ("user_email", 1),
+            ("discovered_for_new_user", 1),
+            ("initial_discovery", 1)
+        ])
+        
         # Compound index for atomic lock acquisition
         await db.database.repositories.create_index([
             ("_id", 1),
@@ -90,7 +102,7 @@ async def create_indexes():
             ("scan_lock_expires", 1)
         ])
         
-        print("Database indexes created successfully with atomic locking support!")
+        print("Database indexes created successfully with new user tracking support!")
         
     except Exception as e:
         print(f"Error creating indexes: {e}")
@@ -99,15 +111,15 @@ async def get_database():
     """Get database instance"""
     return db.database
 
-async def migrate_to_robust_version():
+async def migrate_to_final_version():
     """
-    Migration function to add atomic locking fields to existing repositories
-    Run this once after updating your code to the robust version
+    Migration function to add new user tracking fields to existing repositories
+    Run this once after updating your code to the final version
     """
     try:
         db_instance = await get_database()
         
-        # Add new atomic locking fields to existing repositories that don't have them
+        # Add new fields to existing repositories that don't have them
         result = await db_instance.repositories.update_many(
             {
                 "$or": [
@@ -115,8 +127,8 @@ async def migrate_to_robust_version():
                     {"last_email_sent_at": {"$exists": False}},
                     {"email_batch_commits": {"$exists": False}},
                     {"scan_lock_id": {"$exists": False}},
-                    {"scan_lock_expires": {"$exists": False}},
-                    {"scan_worker_id": {"$exists": False}}
+                    {"discovered_for_new_user": {"$exists": False}},
+                    {"initial_discovery": {"$exists": False}}
                 ]
             },
             {
@@ -127,7 +139,11 @@ async def migrate_to_robust_version():
                     "email_batch_commits": [],
                     
                     # Atomic locking fields  
-                    "scan_status": "idle"
+                    "scan_status": "idle",
+                    
+                    # New user tracking fields
+                    "discovered_for_new_user": False,  # Existing repos are not from new user discovery
+                    "initial_discovery": False
                 },
                 "$unset": {
                     # Remove any stale lock fields from previous versions
@@ -139,17 +155,16 @@ async def migrate_to_robust_version():
             }
         )
         
-        print(f"✅ Robust migration completed: Updated {result.modified_count} repositories with atomic locking fields")
+        print(f"✅ Final migration completed: Updated {result.modified_count} repositories with new user tracking")
         return result.modified_count
         
     except Exception as e:
-        print(f"❌ Robust migration error: {e}")
+        print(f"❌ Final migration error: {e}")
         return 0
 
 async def cleanup_stale_locks():
     """
     Cleanup function to remove any stale or expired locks
-    Can be run periodically or on startup
     """
     try:
         from datetime import datetime
@@ -183,3 +198,47 @@ async def cleanup_stale_locks():
     except Exception as e:
         print(f"❌ Lock cleanup error: {e}")
         return 0
+
+# Helper functions for manual scanning (for your existing manual scan feature)
+async def get_user_repositories_for_manual_scan(user_email: str):
+    """
+    Get repositories that can be manually scanned by the user
+    """
+    try:
+        db_instance = await get_database()
+        
+        # Get all repositories for the user
+        repositories = await db_instance.repositories.find({
+            "user_email": user_email,
+            "is_monitored": True
+        }).to_list(None)
+        
+        return repositories
+        
+    except Exception as e:
+        print(f"❌ Error getting repositories for manual scan: {e}")
+        return []
+
+async def mark_repository_as_manually_scanned(repo_id: str):
+    """
+    Mark a repository as having been manually scanned (clears new user discovery flag)
+    """
+    try:
+        db_instance = await get_database()
+        
+        result = await db_instance.repositories.update_one(
+            {"_id": ObjectId(repo_id)},
+            {
+                "$set": {
+                    "discovered_for_new_user": False,
+                    "initial_discovery": False,
+                    "last_scan": datetime.utcnow()
+                }
+            }
+        )
+        
+        return result.modified_count > 0
+        
+    except Exception as e:
+        print(f"❌ Error marking repository as manually scanned: {e}")
+        return False
