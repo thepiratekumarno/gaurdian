@@ -11,7 +11,7 @@ import base64
 import hashlib
 
 # Import your app modules
-from . import crud, database, email_service_secure as email_service, detector
+from . import crud, database, email_service as email_service, detector
 
 logger = logging.getLogger(__name__)
 
