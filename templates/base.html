@@ -25,5 +25,26 @@
     </main>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- PocketFlow Chatbot - Start -->
+<script>
+(function() {
+    var script = document.createElement("script");
+    script.src = "https://pocketflow-tutorial-website-chatbot-main.onrender.com/embed/chatbot.js";
+    script.onload = function() {
+        initializeChatbot({
+            extra_urls: ["https://secretguardian.onrender.com/dashboard"],
+            prefixes: ["https://secretguardian.onrender.com/reports","https://secretguardian.onrender.com/repositories","https://secretguardian.onrender.com/dashboard"],
+            chatbotName: 'Guardianchatbot',
+            wsUrl: 'wss://pocketflow-tutorial-website-chatbot-main.onrender.com/api/ws/chat',
+            instruction: 'only respond my page not another page ',
+            isOpen: false
+        });
+    };
+    document.head.appendChild(script);
+})();
+</script>
+<!-- PocketFlow Chatbot - End -->
 </body>
 </html>
+
