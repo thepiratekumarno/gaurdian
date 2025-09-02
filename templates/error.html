@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error{% endblock %}
+
+{% block content %}
+<div style="min-height: calc(100vh - 160px); display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(57, 5, 23, 0.1) 0%, var(--color-background) 70%);">
+    <div class="container" style="text-align: center; max-width: 600px;">
+        <div style="margin-bottom: 3rem;">
+            <i class="fas fa-exclamation-triangle" style="font-size: 6rem; color: var(--color-accent); opacity: 0.8; margin-bottom: 2rem;"></i>
+            
+            <h1 style="font-size: 3rem; font-weight: 700; color: var(--color-accent); margin-bottom: 1rem;">
+                500
+            </h1>
+            
+            <h2 style="font-size: 1.5rem; color: var(--color-text); margin-bottom: 1rem;">
+                Internal Server Error
+            </h2>
+            
+            <p style="color: var(--color-text-secondary); font-size: 1.125rem; line-height: 1.6; margin-bottom: 2rem;">
+                {{ message or "Something went wrong on our servers. Our security team has been notified and is working to fix this issue." }}
+            </p>
+        </div>
+
+        <!-- Quick Actions -->
+        <div style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 3rem;">
+            <a href="/dashboard" class="btn btn-primary">
+                <i class="fas fa-home"></i>
+                Go to Dashboard
+            </a>
+            <button onclick="location.reload()" class="btn btn-secondary">
+                <i class="fas fa-refresh"></i>
+                Try Again
+            </button>
+            <button onclick="history.back()" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i>
+                Go Back
+            </button>
+        </div>
+
+        <!-- Error Details (for development) -->
+        {% if error_details and request.query_params.get('debug') %}
+        <div class="card" style="max-width: 800px; margin: 0 auto; text-align: left;">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <i class="fas fa-bug"></i>
+                    Error Details (Debug Mode)
+                </h3>
+            </div>
+            <div class="card-content">
+                <pre style="background: var(--color-background); padding: 1rem; border-radius: var(--radius-md); color: var(--color-text); font-size: 0.875rem; overflow-x: auto; white-space: pre-wrap; border: 1px solid var(--color-border);">{{ error_details }}</pre>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Security Tip -->
+        <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(163, 133, 96, 0.05); border-radius: 1rem; border: 1px solid rgba(163, 133, 96, 0.2);">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                <i class="fas fa-shield-alt" style="color: var(--color-primary);"></i>
+                <strong style="color: var(--color-primary);">Security Notice</strong>
+            </div>
+            <p style="margin: 0; font-size: 0.875rem; color: var(--color-text-secondary);">
+                If you were performing security scans when this error occurred, your repository data remains secure. 
+                Our systems are designed with security-first architecture to protect your code at all times.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Auto-refresh page after 30 seconds if error might be temporary
+    setTimeout(() => {
+        if (confirm('Would you like to try reloading the page?')) {
+            location.reload();
+        }
+    }, 30000);
+
+    // Track error for analytics (if enabled)
+    if (window.gtag) {
+        gtag('event', 'server_error', {
+            'error_type': '500',
+            'page_location': window.location.href
+        });
+    }
+</script>
+{% endblock %}

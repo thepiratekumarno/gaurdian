@@ -4,9 +4,18 @@
 
 {% block content %}
 <div class="container">
-    <div class="header">
-        <h1>Code Security Scanner</h1>
-        <p>Scan your code for exposed secrets and credentials</p>
+
+    <!-- Page Header -->
+    <div style="margin-bottom: var(--space-xl); text-align: center; padding: var(--space-xl) 0;">
+        <div style="display: flex; align-items: center; justify-content: center; width: 80px; height: 80px; margin: 0 auto var(--space-lg) auto;">
+            <i class="fas fa-search" style="font-size: 2rem;"></i>
+        </div>
+        <h1 style="font-size: 2.5rem; margin-bottom: var(--space-md); color: white;">
+            Manual Code Scanner
+        </h1>
+        <p style="color: var(--color-text-secondary); font-size: 1.125rem; max-width: 600px; margin: 0 auto;">
+            Paste your code below to scan for exposed secrets and credentials using our AI-powered detection engine.
+        </p>
     </div>
 
     <div class="card mt-4">
@@ -24,22 +33,62 @@
     <div class="info-section mt-5">
         <h2>What We Detect</h2>
         <div class="detection-types">
-            <div class="detection-item">
-                <strong>AWS Credentials</strong>
-                <p>Access keys, secret keys, and session tokens</p>
+            <div class="card">
+            <div class="card-content">
+                <div style="display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md);">
+                    <div style=" background: rgba(163, 133, 96, 0.1); display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-key" style="color: var(--color-primary); font-size: 1.25rem;"></i>
+                    </div>
+                    <h3 style="margin: 0; color: rgba(76, 200, 238, 1);">API Keys & Tokens</h3>
+                </div>
+                <p style="font-size: 0.875rem; color: white; margin: 0; line-height: 1.5;">
+                    Detects AWS access keys, GitHub tokens, Google API keys, and other service authentication credentials.
+                </p>
             </div>
-            <div class="detection-item">
-                <strong>API Keys</strong>
-                <p>Google, Stripe, SendGrid, and other service keys</p>
+          </div>
+
+            <div class="card">
+            <div class="card-content">
+                <div style="display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md);">
+                    <div style="background: rgba(163, 133, 96, 0.1); display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-database" style="color: var(--color-primary); font-size: 1.25rem;"></i>
+                    </div>
+                    <h3 style="margin: 0; color: rgba(76, 200, 238, 1);">Database Credentials</h3>
+                </div>
+                <p style="font-size: 0.875rem; color: white; margin: 0; line-height: 1.5;">
+                    Identifies MongoDB URIs, SQL connection strings, and database passwords in your code.
+                </p>
             </div>
-            <div class="detection-item">
-                <strong>Database Credentials</strong>
-                <p>MongoDB, PostgreSQL, MySQL connection strings</p>
+          </div>
+            <div class="card">
+            <div class="card-content">
+                <div style="display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md);">
+                    <div style="background: rgba(163, 133, 96, 0.1); display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-lock" style="color: var(--color-primary); font-size: 1.25rem;"></i>
+                    </div>
+                    <h3 style="margin: 0; color: rgba(76, 200, 238, 1);">Private Keys</h3>
+                </div>
+                <p style="font-size: 0.875rem; color: white; margin: 0; line-height: 1.5;">
+                    Finds RSA private keys, SSH keys, and other cryptographic secrets that shouldn't be in code.
+                </p>
             </div>
-            <div class="detection-item">
-                <strong>Private Keys</strong>
-                <p>SSH keys, RSA private keys, and PGP keys</p>
+         </div>
+
+          <div class="card">
+             <div class="card-content">
+                <div style="display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md);">
+                    <div style="background: rgba(163, 133, 96, 0.1); display: flex; align-items: center; justify-content: center;">
+                        <i class="fas fa-brain" style="color: var(--color-primary); font-size: 1.25rem;"></i>
+                    </div>
+                    <h3 style="margin: 0; color: rgba(76, 200, 238, 1);">AI-Powered Detection</h3>
+                </div>
+                 <p style="font-size: 0.875rem; color: white; margin: 0; line-height: 1.5;">
+                    Uses entropy analysis and machine learning to detect unknown secrets with high accuracy.
+                 </p>
+             </div>
             </div>
+           </div>
+
         </div>
     </div>
 </div>

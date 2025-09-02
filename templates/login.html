@@ -1,39 +1,109 @@
-{% extends "base.html" %}
+{% extends "bases.html" %}
 
-{% block title %}Login{% endblock %}
+{% block title %}Login - SecretGuardian{% endblock %}
+
+{% block head %}
+<!-- Secure session management meta tags -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-6">
-        <div class="card">
-            <div class="card-body">
-                <h2 class="card-title text-center mb-4">🛡️ SecretGuardian</h2>
-                <p class="text-center text-muted mb-4">Protect your repositories from exposed secrets</p>
-                
-                <div class="d-grid gap-2">
-                    <a href="/auth/github" class="btn btn-dark btn-lg">
-                        <i class="fab fa-github"></i> Login with GitHub
-                    </a>
-                    <a href="/auth/google" class="btn btn-danger btn-lg">
-                        <i class="fab fa-google"></i> Login with Google
-                    </a>
+<div class="auth-page">
+    <!-- Left side with GIF -->
+    <div class="auth-left"></div>
+
+    <!-- Right side with login form -->
+    <div class="auth-right">
+        <div class="auth-content">
+            <!-- Security Status Indicator -->
+            <div class="auth-state" title="Secure Connection"></div>
+
+            <!-- Header -->
+            <div style="margin-bottom: 2rem; text-align: center;">
+                <!-- Project Logo + Name -->
+                <div class="brand-logo">
+                    <img src="/static/favicon1.png" alt="SecretGuardian Logo">
                 </div>
-                
-                <hr class="my-4">
-                
-                <form method="post" action="/token">
-                    <div class="mb-3">
-                        <input type="text" name="username" class="form-control" placeholder="Username" required>
-                    </div>
-                    <div class="mb-3">
-                        <input type="password" name="password" class="form-control" placeholder="Password" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100">Demo Login</button>
-                </form>
-                
-                <p class="text-center mt-3 small text-muted">
-                    Demo credentials: admin / admin
+
+                <h1 style="font-size: 1.75rem; font-weight: 700; color: white; margin-top: 1rem; margin-bottom: 0.5rem;">
+                    Welcome to <span style="color: var(--color-primary);">SecretGuardian</span>
+                </h1>
+                <p style="color: var(--color-text-secondary); font-size: 0.875rem; margin: 0;">
+                    Secure your repositories with AI-powered secret detection
                 </p>
+            </div>
+
+            <!-- OAuth Providers -->
+            <div class="auth-providers">
+                <a href="/auth/github" class="auth-provider-btn github">
+                    <i class="fab fa-github"></i>
+                    <span>Continue with GitHub</span>
+                </a>
+                <a href="/auth/google" class="auth-provider-btn google">
+                    <i class="fab fa-google"></i>
+                    <span>Continue with Google</span>
+                </a>
+            </div>
+
+            <!-- Divider -->
+            <div class="divider">
+                <span>or</span>
+            </div>
+
+            <!-- Demo Login Form -->
+            <form method="post" action="/token" class="auth-form">
+                <div class="form-group">
+                    <label for="username" class="form-label">
+                        <i class="fas fa-user"></i>
+                        Username
+                    </label>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        class="form-input" 
+                        placeholder="Enter demo username"
+                        required
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="password" class="form-label">
+                        <i class="fas fa-lock"></i>
+                        Password
+                    </label>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        class="form-input" 
+                        placeholder="Enter demo password"
+                        required
+                    >
+                </div>
+
+                <button type="submit" class="auth-submit">
+                    <i class="fas fa-sign-in-alt"></i>
+                    Sign In
+                </button>
+            </form>
+
+            <!-- Security Indicators -->
+            <div style="display: flex; justify-content: center; gap: 1rem; margin-top: 1.5rem; font-size: 0.75rem; color: var(--color-text-muted);">
+                <div class="security-indicator">
+                    <i class="fas fa-shield-alt"></i>
+                    <span>SSL Encrypted</span>
+                </div>
+                <div class="security-indicator">
+                    <i class="fas fa-user-shield"></i>
+                    <span>Privacy Protected</span>
+                </div>
+                <div class="security-indicator">
+                    <i class="fas fa-database"></i>
+                    <span>SOC 2 Compliant</span>
+                </div>
             </div>
         </div>
     </div>
