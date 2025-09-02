@@ -1,700 +1,742 @@
-// Secret Guardian - JavaScript with Solarin Theme Colors
+// SecretGuardian - Dark Mode Only Landing Page JavaScript
 
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize homepage animations if on homepage
-    if (document.getElementById('hero-canvas')) {
-        initThreeJSBackground();
-        initScrollAnimations();
-    }
-    
-    // Initialize general features for all pages
-    initNavigation();
-    initUtilities();
-});
+window.SecretGuardian = {
+    // Initialize the application
+    init() {
+        this.enforceHardDarkMode();
+        this.setupEventListeners();
+        this.initializeAnimations();
+        this.setupNotifications();
+        this.setupKeyboardShortcuts();
+    },
 
-// Three.js Background Animation for Homepage - Solarin Colors
-function initThreeJSBackground() {
-    const canvas = document.getElementById('hero-canvas');
-    if (!canvas) return;
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ 
-        canvas: canvas, 
-        alpha: true,
-        antialias: true 
-    });
-
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setClearColor(0x000000, 0);
-
-    // Create particles with Solarin colors
-    const particlesGeometry = new THREE.BufferGeometry();
-    const particlesCount = 1000;
-    const posArray = new Float32Array(particlesCount * 3);
-    const colorArray = new Float32Array(particlesCount * 3);
-
-    // Solarin color palette
-    const solarinColors = [
-        { r: 0.196, g: 0.722, b: 0.776 }, // Bright teal #32B8C6
-        { r: 0.067, g: 0.392, b: 0.400 }, // Deep teal #116466
-        { r: 0.851, g: 0.690, b: 0.549 }, // Copper #D9B08C
-        { r: 1.000, g: 0.796, b: 0.604 }, // Peach #FFCB9A
-        { r: 0.820, g: 0.910, b: 0.886 }  // Mint #D1E8E2
-    ];
-
-    for(let i = 0; i < particlesCount; i++) {
-        // Position
-        posArray[i * 3] = (Math.random() - 0.5) * 50;
-        posArray[i * 3 + 1] = (Math.random() - 0.5) * 50;
-        posArray[i * 3 + 2] = (Math.random() - 0.5) * 50;
-
-        // Color - randomly pick from Solarin palette
-        const colorIndex = Math.floor(Math.random() * solarinColors.length);
-        const color = solarinColors[colorIndex];
-        colorArray[i * 3] = color.r;
-        colorArray[i * 3 + 1] = color.g;
-        colorArray[i * 3 + 2] = color.b;
-    }
-
-    particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-    particlesGeometry.setAttribute('color', new THREE.BufferAttribute(colorArray, 3));
-
-    const particlesMaterial = new THREE.PointsMaterial({
-        size: 0.025,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending
-    });
-
-    const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
-    scene.add(particlesMesh);
-
-    // Create connections between nearby particles
-    const connections = new THREE.BufferGeometry();
-    const connectionPositions = [];
-    const connectionColors = [];
-
-    for(let i = 0; i < particlesCount; i++) {
-        for(let j = i + 1; j < particlesCount; j++) {
-            const distance = Math.sqrt(
-                Math.pow(posArray[i * 3] - posArray[j * 3], 2) +
-                Math.pow(posArray[i * 3 + 1] - posArray[j * 3 + 1], 2) +
-                Math.pow(posArray[i * 3 + 2] - posArray[j * 3 + 2], 2)
-            );
-
-            if(distance < 3.5) {
-                connectionPositions.push(
-                    posArray[i * 3], posArray[i * 3 + 1], posArray[i * 3 + 2],
-                    posArray[j * 3], posArray[j * 3 + 1], posArray[j * 3 + 2]
-                );
-
-                // Use bright teal for connections
-                const opacity = 1 - (distance / 3.5);
-                connectionColors.push(0.196, 0.722, 0.776, opacity * 0.3);
-                connectionColors.push(0.196, 0.722, 0.776, opacity * 0.3);
-            }
-        }
-    }
-
-    connections.setAttribute('position', new THREE.Float32BufferAttribute(connectionPositions, 3));
-    connections.setAttribute('color', new THREE.Float32BufferAttribute(connectionColors, 4));
-
-    const connectionMaterial = new THREE.LineBasicMaterial({
-        vertexColors: true,
-        transparent: true,
-        blending: THREE.AdditiveBlending
-    });
-
-    const connectionMesh = new THREE.LineSegments(connections, connectionMaterial);
-    scene.add(connectionMesh);
-
-    camera.position.z = 15;
-
-    // Animation variables
-    let mouseX = 0;
-    let mouseY = 0;
-    let time = 0;
-    
-    document.addEventListener('mousemove', (event) => {
-        mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-        mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-    });
-
-    function animate() {
-        requestAnimationFrame(animate);
-        time += 0.01;
-
-        // Rotate particles slowly with some wave motion
-        particlesMesh.rotation.x += 0.0003;
-        particlesMesh.rotation.y += 0.0008;
-        connectionMesh.rotation.x += 0.0003;
-        connectionMesh.rotation.y += 0.0008;
-
-        // Add subtle floating motion
-        particlesMesh.position.y = Math.sin(time * 0.5) * 0.5;
-        connectionMesh.position.y = Math.sin(time * 0.5) * 0.5;
-
-        // Mouse interaction with smooth following
-        camera.position.x += (mouseX * 0.2 - camera.position.x) * 0.02;
-        camera.position.y += (mouseY * 0.2 - camera.position.y) * 0.02;
-        camera.lookAt(scene.position);
-
-        renderer.render(scene, camera);
-    }
-
-    animate();
-
-    // Handle window resize
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-}
-
-// Scroll Animations for Homepage
-function initScrollAnimations() {
-    const observerOptions = {
-        threshold: 0.1,
-        rootMargin: '0px 0px -50px 0px'
-    };
-
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.style.opacity = '1';
-                entry.target.style.transform = 'translateY(0)';
-                
-                // Add stagger effect to feature cards
-                if (entry.target.classList.contains('homepage-feature-card')) {
-                    const cards = document.querySelectorAll('.homepage-feature-card');
-                    const index = Array.from(cards).indexOf(entry.target);
-                    entry.target.style.transitionDelay = `${index * 0.1}s`;
-                }
-                
-                observer.unobserve(entry.target);
-            }
-        });
-    }, observerOptions);
-
-    // Observe elements for animation
-    const animateElements = document.querySelectorAll('.homepage-feature-card, .homepage-step');
-    animateElements.forEach(el => {
-        el.style.opacity = '0';
-        el.style.transform = 'translateY(30px)';
-        el.style.transition = 'opacity 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
-        observer.observe(el);
-    });
-
-    // Navbar scroll effect for homepage
-    const navbar = document.querySelector('.homepage-navbar');
-    if (navbar) {
-        window.addEventListener('scroll', () => {
-            if (window.scrollY > 50) {
-                navbar.style.background = 'rgba(44, 53, 49, 0.98)';
-                navbar.style.backdropFilter = 'blur(25px)';
-                navbar.style.borderBottom = '1px solid rgba(50, 184, 198, 0.3)';
-            } else {
-                navbar.style.background = 'rgba(44, 53, 49, 0.95)';
-                navbar.style.backdropFilter = 'blur(20px)';
-                navbar.style.borderBottom = '1px solid rgba(50, 184, 198, 0.2)';
-            }
-        });
-    }
-
-    // Enhanced smooth scroll for anchor links
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener('click', function (e) {
-            e.preventDefault();
-            const target = document.querySelector(this.getAttribute('href'));
-            if (target) {
-                const offsetTop = target.offsetTop - 70;
-                window.scrollTo({
-                    top: offsetTop,
-                    behavior: 'smooth'
-                });
-                
-                // Add temporary highlight effect
-                target.style.transition = 'box-shadow 0.3s ease';
-                target.style.boxShadow = '0 0 30px rgba(50, 184, 198, 0.3)';
-                setTimeout(() => {
-                    target.style.boxShadow = '';
-                }, 1000);
-            }
-        });
-    });
-
-    // Parallax effect for hero section
-    const heroSection = document.querySelector('.homepage-hero');
-    if (heroSection) {
-        window.addEventListener('scroll', () => {
-            const scrolled = window.pageYOffset;
-            const rate = scrolled * -0.3;
-            heroSection.style.transform = `translateY(${rate}px)`;
-        });
-    }
-}
-
-// Navigation for all pages
-function initNavigation() {
-    // Mobile navigation toggle (if you add it later)
-    const navToggle = document.querySelector('.nav-toggle');
-    const navMenu = document.querySelector('.nav-menu');
-
-    if (navToggle && navMenu) {
-        navToggle.addEventListener('click', () => {
-            navMenu.classList.toggle('active');
-            navToggle.classList.toggle('active');
-        });
-    }
-
-    // Add active states to navigation links
-    const currentPath = window.location.pathname;
-    const navLinks = document.querySelectorAll('.nav-link');
-    
-    navLinks.forEach(link => {
-        if (link.getAttribute('href') === currentPath) {
-            link.classList.add('active');
-        }
-    });
-
-    // Add ripple effect to buttons
-    const buttons = document.querySelectorAll('.homepage-btn, .btn');
-    buttons.forEach(button => {
-        button.addEventListener('click', function(e) {
-            const ripple = document.createElement('span');
-            const rect = this.getBoundingClientRect();
-            const size = Math.max(rect.width, rect.height);
-            const x = e.clientX - rect.left - size / 2;
-            const y = e.clientY - rect.top - size / 2;
-            
-            ripple.style.width = ripple.style.height = size + 'px';
-            ripple.style.left = x + 'px';
-            ripple.style.top = y + 'px';
-            ripple.classList.add('ripple');
-            
-            this.appendChild(ripple);
-            
-            setTimeout(() => {
-                ripple.remove();
-            }, 600);
-        });
-    });
-}
-
-// Enhanced utility functions for all pages
-function initUtilities() {
-    // Enhanced hover effects with Solarin colors
-    const interactiveElements = document.querySelectorAll('.btn, .card, .homepage-feature-card, .homepage-step');
-    
-    interactiveElements.forEach(element => {
-        element.addEventListener('mouseenter', function() {
-            this.style.transform = 'translateY(-3px)';
-            if (this.classList.contains('homepage-feature-card')) {
-                this.style.boxShadow = '0 10px 40px rgba(50, 184, 198, 0.3)';
-            }
-        });
+    // Force dark mode permanently
+    enforceHardDarkMode() {
+        // Set dark theme permanently
+        document.documentElement.setAttribute('data-color-scheme', 'dark');
+        document.body.classList.add('dark-theme');
         
-        element.addEventListener('mouseleave', function() {
-            this.style.transform = 'translateY(0)';
-            if (this.classList.contains('homepage-feature-card')) {
-                this.style.boxShadow = '';
-            }
-        });
-    });
+        // Remove any light mode classes if they exist
+        document.body.classList.remove('light-theme');
+        
+        // Set CSS custom properties for dark mode
+        document.documentElement.style.setProperty('--color-background', 'rgba(31, 33, 33, 1)');
+        document.documentElement.style.setProperty('--color-surface', 'rgba(38, 40, 40, 1)');
+        document.documentElement.style.setProperty('--color-text', 'rgba(245, 245, 245, 1)');
+        
+        // Override any system theme detection
+        if (window.matchMedia) {
+            window.matchMedia('(prefers-color-scheme: light)').removeEventListener = () => {};
+            window.matchMedia('(prefers-color-scheme: dark)').removeEventListener = () => {};
+        }
+    },
 
-    // Enhanced form handling with better feedback
-    const forms = document.querySelectorAll('form');
-    forms.forEach(form => {
-        form.addEventListener('submit', function() {
-            const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
-            if (submitBtn) {
-                const originalText = submitBtn.innerHTML || submitBtn.value;
-                if (submitBtn.tagName === 'BUTTON') {
-                    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
-                    submitBtn.style.background = 'linear-gradient(135deg, #32B8C6, #116466)';
+    // Setup global event listeners
+    setupEventListeners() {
+        // Navbar scroll effects
+        const navbar = document.querySelector('.navbar');
+        if (navbar) {
+            let lastScrollY = window.scrollY;
+            window.addEventListener('scroll', () => {
+                const currentScrollY = window.scrollY;
+                
+                // Change navbar background on scroll - Dark mode only
+                if (currentScrollY > 50) {
+                    navbar.style.background = 'rgba(31, 33, 33, 0.98)';
+                    navbar.style.backdropFilter = 'blur(25px)';
+                    navbar.style.borderBottom = '1px solid rgba(119, 124, 124, 0.5)';
                 } else {
-                    submitBtn.value = 'Processing...';
+                    navbar.style.background = 'rgba(31, 33, 33, 0.95)';
+                    navbar.style.backdropFilter = 'blur(20px)';
+                    navbar.style.borderBottom = '1px solid rgba(119, 124, 124, 0.3)';
                 }
-                submitBtn.disabled = true;
-                
-                // Re-enable after 5 seconds as fallback
-                setTimeout(() => {
-                    if (submitBtn.tagName === 'BUTTON') {
-                        submitBtn.innerHTML = originalText;
-                        submitBtn.style.background = '';
-                    } else {
-                        submitBtn.value = originalText;
+
+                // Hide/show navbar on scroll
+                if (currentScrollY > lastScrollY && currentScrollY > 100) {
+                    navbar.style.transform = 'translateY(-100%)';
+                } else {
+                    navbar.style.transform = 'translateY(0)';
+                }
+
+                lastScrollY = currentScrollY;
+            });
+        }
+
+        // Smooth scrolling for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    const offsetTop = target.offsetTop - 80;
+                    window.scrollTo({
+                        top: offsetTop,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+
+        // Mobile menu toggle
+        const mobileToggle = document.querySelector('.mobile-menu-toggle');
+        const navMenu = document.querySelector('.nav-menu');
+        if (mobileToggle && navMenu) {
+            mobileToggle.addEventListener('click', () => {
+                navMenu.classList.toggle('active');
+                const icon = mobileToggle.querySelector('i');
+                if (icon) {
+                    icon.classList.toggle('fa-bars');
+                    icon.classList.toggle('fa-times');
+                }
+            });
+
+            // Close menu when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!mobileToggle.contains(e.target) && !navMenu.contains(e.target)) {
+                    navMenu.classList.remove('active');
+                    const icon = mobileToggle.querySelector('i');
+                    if (icon) {
+                        icon.classList.add('fa-bars');
+                        icon.classList.remove('fa-times');
                     }
-                    submitBtn.disabled = false;
-                }, 5000);
+                }
+            });
+        }
+
+        // Form enhancements
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', this.handleFormSubmit.bind(this));
+        });
+
+        // Button click effects
+        document.querySelectorAll('.btn').forEach(btn => {
+            btn.addEventListener('click', this.createRippleEffect);
+        });
+
+        // Showcase image clicks
+        document.querySelectorAll('.preview-overlay, .showcase-overlay').forEach(overlay => {
+            overlay.addEventListener('click', (e) => {
+                const img = e.currentTarget.previousElementSibling || 
+                           e.currentTarget.parentElement.querySelector('img');
+                if (img) {
+                    this.openImageModal(img.src, img.alt);
+                }
+            });
+        });
+
+        // Parallax effect for sections
+        this.setupParallaxEffect();
+    },
+
+    // Setup parallax effect for elements
+    setupParallaxEffect() {
+        const parallaxElements = document.querySelectorAll('.hero-section, .stats-section');
+        window.addEventListener('scroll', () => {
+            const scrollTop = window.pageYOffset;
+            parallaxElements.forEach((element, index) => {
+                const rate = scrollTop * -0.05 * (index + 1);
+                element.style.transform = `translateY(${rate}px)`;
+            });
+        });
+    },
+
+    // Initialize animations and intersection observer
+    initializeAnimations() {
+        // Intersection Observer for scroll animations
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('animate-in');
+                    
+                    // Add staggered animation for grid items
+                    if (entry.target.parentElement?.classList.contains('features-grid') ||
+                        entry.target.parentElement?.classList.contains('security-grid') ||
+                        entry.target.parentElement?.classList.contains('stats-grid')) {
+                        const siblings = Array.from(entry.target.parentElement.children);
+                        const index = siblings.indexOf(entry.target);
+                        entry.target.style.animationDelay = `${index * 0.1}s`;
+                    }
+
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+
+        // Observe elements for animation
+        document.querySelectorAll(`
+            .feature-card,
+            .security-item,
+            .stat-card,
+            .showcase-item,
+            .benefit-item,
+            .section-header
+        `).forEach(el => {
+            observer.observe(el);
+        });
+
+        // Counter animation for statistics
+        this.animateCounters();
+        
+        // Add hover effects to cards
+        this.setupHoverEffects();
+    },
+
+    // Setup hover effects for interactive elements
+    setupHoverEffects() {
+        // Feature cards hover effect
+        document.querySelectorAll('.feature-card').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                card.style.transform = 'translateY(-8px)';
+                card.style.transition = 'all 0.3s ease';
+                card.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2)';
+            });
+
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'translateY(0)';
+                card.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.2)';
+            });
+        });
+
+        // Security items hover effect
+        document.querySelectorAll('.security-item').forEach(item => {
+            item.addEventListener('mouseenter', () => {
+                item.style.transform = 'translateY(-4px)';
+                item.style.transition = 'all 0.3s ease';
+            });
+
+            item.addEventListener('mouseleave', () => {
+                item.style.transform = 'translateY(0)';
+            });
+        });
+
+        // Stat cards hover effect
+        document.querySelectorAll('.stat-card').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                card.style.transform = 'translateY(-4px) scale(1.02)';
+                card.style.transition = 'all 0.3s ease';
+            });
+
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'translateY(0) scale(1)';
+            });
+        });
+
+        // Benefit items hover effect
+        document.querySelectorAll('.benefit-item').forEach(item => {
+            item.addEventListener('mouseenter', () => {
+                const icon = item.querySelector('.benefit-icon');
+                if (icon) {
+                    icon.style.transform = 'scale(1.1) rotate(5deg)';
+                    icon.style.transition = 'all 0.3s ease';
+                }
+            });
+
+            item.addEventListener('mouseleave', () => {
+                const icon = item.querySelector('.benefit-icon');
+                if (icon) {
+                    icon.style.transform = 'scale(1) rotate(0deg)';
+                }
+            });
+        });
+    },
+
+    // Animate number counters
+    animateCounters() {
+        const counters = document.querySelectorAll('[data-count], .stat-number');
+        
+        const counterObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const target = entry.target;
+                    const finalValue = target.getAttribute('data-count') || target.textContent;
+                    
+                    if (finalValue.includes('%')) {
+                        this.animateNumber(target, 0, parseInt(finalValue), 2000, '%');
+                    } else if (finalValue.includes('+')) {
+                        this.animateNumber(target, 0, parseInt(finalValue), 2000, '+');
+                    } else if (!isNaN(parseInt(finalValue))) {
+                        this.animateNumber(target, 0, parseInt(finalValue), 2000);
+                    }
+
+                    counterObserver.unobserve(target);
+                }
+            });
+        }, { threshold: 0.5 });
+
+        counters.forEach(counter => counterObserver.observe(counter));
+    },
+
+    // Animate a number from start to end
+    animateNumber(element, start, end, duration, suffix = '') {
+        const range = end - start;
+        const increment = range / (duration / 16);
+        let current = start;
+
+        const timer = setInterval(() => {
+            current += increment;
+            if (current >= end) {
+                element.textContent = end + suffix;
+                clearInterval(timer);
+            } else {
+                element.textContent = Math.floor(current) + suffix;
+            }
+        }, 16);
+    },
+
+    // Setup notification system
+    setupNotifications() {
+        // Create notification container if it doesn't exist
+        if (!document.getElementById('notification-container')) {
+            const container = document.createElement('div');
+            container.id = 'notification-container';
+            container.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                z-index: 10000;
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                max-width: 400px;
+                pointer-events: none;
+            `;
+            document.body.appendChild(container);
+        }
+    },
+
+    // Show notification
+    showNotification(message, type = 'info', duration = 5000) {
+        const container = document.getElementById('notification-container');
+        if (!container) return;
+
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+
+        const colors = {
+            success: '#32B8C6',
+            error: '#FF5459',
+            warning: '#E68161',
+            info: '#50B8C6'
+        };
+
+        notification.style.cssText = `
+            background: linear-gradient(145deg, rgba(38, 40, 40, 0.95), rgba(31, 33, 33, 1));
+            color: #F5F5F5;
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            border-left: 4px solid ${colors[type] || colors.info};
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+            transform: translateX(100%);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            pointer-events: auto;
+            backdrop-filter: blur(20px);
+        `;
+
+        const icons = {
+            success: 'fa-check-circle',
+            error: 'fa-exclamation-triangle',
+            warning: 'fa-exclamation-circle',
+            info: 'fa-info-circle'
+        };
+
+        notification.innerHTML = `
+            <i class="fas ${icons[type] || icons.info}" style="color: ${colors[type] || colors.info}"></i>
+            <span>${message}</span>
+            <i class="fas fa-times" style="cursor: pointer; margin-left: auto; opacity: 0.7;"></i>
+        `;
+
+        // Close button functionality
+        notification.querySelector('.fa-times').addEventListener('click', () => {
+            notification.style.transform = 'translateX(100%)';
+            setTimeout(() => notification.remove(), 300);
+        });
+
+        container.appendChild(notification);
+
+        // Animate in
+        setTimeout(() => {
+            notification.style.transform = 'translateX(0)';
+        }, 10);
+
+        // Auto remove
+        if (duration > 0) {
+            setTimeout(() => {
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (notification.parentElement) {
+                        notification.remove();
+                    }
+                }, 300);
+            }, duration);
+        }
+
+        return notification;
+    },
+
+    // Open image modal for showcase
+    openImageModal(src, alt) {
+        const modal = document.createElement('div');
+        modal.className = 'image-modal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            backdrop-filter: blur(10px);
+        `;
+
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = alt;
+        img.style.cssText = `
+            max-width: 90vw;
+            max-height: 90vh;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+            object-fit: contain;
+        `;
+
+        const closeButton = document.createElement('button');
+        closeButton.innerHTML = '<i class="fas fa-times"></i>';
+        closeButton.style.cssText = `
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(38, 40, 40, 0.8);
+            border: 2px solid rgba(245, 245, 245, 0.3);
+            color: #F5F5F5;
+            font-size: 18px;
+            padding: 12px;
+            border-radius: 50%;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            transition: all 0.2s ease;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        `;
+
+        closeButton.addEventListener('mouseenter', () => {
+            closeButton.style.background = 'rgba(50, 184, 198, 0.8)';
+            closeButton.style.transform = 'scale(1.1)';
+        });
+
+        closeButton.addEventListener('mouseleave', () => {
+            closeButton.style.background = 'rgba(38, 40, 40, 0.8)';
+            closeButton.style.transform = 'scale(1)';
+        });
+
+        // Add loading indicator
+        const loader = document.createElement('div');
+        loader.style.cssText = `
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #F5F5F5;
+            font-size: 2rem;
+        `;
+        loader.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+        modal.appendChild(loader);
+        modal.appendChild(closeButton);
+        document.body.appendChild(modal);
+
+        // Handle image loading
+        img.onload = () => {
+            loader.remove();
+            modal.appendChild(img);
+        };
+
+        img.onerror = () => {
+            loader.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Failed to load image';
+        };
+
+        // Animate in
+        setTimeout(() => {
+            modal.style.opacity = '1';
+        }, 10);
+
+        // Close functions
+        const closeModal = () => {
+            modal.style.opacity = '0';
+            setTimeout(() => modal.remove(), 300);
+        };
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+
+        closeButton.addEventListener('click', closeModal);
+
+        // Close on escape
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+                document.removeEventListener('keydown', handleEscape);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+    },
+
+    // Handle form submissions
+    handleFormSubmit(event) {
+        const form = event.target;
+        const submitButton = form.querySelector('[type="submit"]');
+        
+        if (submitButton && !submitButton.disabled) {
+            const originalText = submitButton.innerHTML;
+            
+            // Add loading state
+            submitButton.classList.add('loading');
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+            
+            // Reset after timeout (fallback)
+            setTimeout(() => {
+                if (submitButton.classList.contains('loading')) {
+                    submitButton.classList.remove('loading');
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = originalText;
+                }
+            }, 10000);
+        }
+    },
+
+    // Create ripple effect on button clicks
+    createRippleEffect(event) {
+        const button = event.currentTarget;
+        const rect = button.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height);
+        const x = event.clientX - rect.left - size / 2;
+        const y = event.clientY - rect.top - size / 2;
+
+        const ripple = document.createElement('span');
+        ripple.style.cssText = `
+            position: absolute;
+            width: ${size}px;
+            height: ${size}px;
+            left: ${x}px;
+            top: ${y}px;
+            background: rgba(50, 184, 198, 0.3);
+            border-radius: 50%;
+            transform: scale(0);
+            animation: ripple 0.6s linear;
+            pointer-events: none;
+        `;
+
+        // Add ripple animation if not exists
+        if (!document.querySelector('#ripple-styles')) {
+            const style = document.createElement('style');
+            style.id = 'ripple-styles';
+            style.textContent = `
+                @keyframes ripple {
+                    to {
+                        transform: scale(4);
+                        opacity: 0;
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        button.style.position = 'relative';
+        button.style.overflow = 'hidden';
+        button.appendChild(ripple);
+
+        setTimeout(() => {
+            ripple.remove();
+        }, 600);
+    },
+
+    // Setup keyboard shortcuts
+    setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (event) => {
+            // Escape to close notifications and modals
+            if (event.key === 'Escape') {
+                document.querySelectorAll('.notification').forEach(n => n.remove());
+                document.querySelectorAll('.image-modal').forEach(m => {
+                    m.style.opacity = '0';
+                    setTimeout(() => m.remove(), 300);
+                });
+            }
+
+            // Alt + H for home
+            if (event.altKey && event.key === 'h') {
+                event.preventDefault();
+                window.location.href = '#hero-section';
+            }
+
+            // Alt + F for features
+            if (event.altKey && event.key === 'f') {
+                event.preventDefault();
+                const featuresSection = document.querySelector('#features');
+                if (featuresSection) {
+                    featuresSection.scrollIntoView({ behavior: 'smooth' });
+                }
+            }
+
+            // Alt + S for security
+            if (event.altKey && event.key === 's') {
+                event.preventDefault();
+                const securitySection = document.querySelector('#security');
+                if (securitySection) {
+                    securitySection.scrollIntoView({ behavior: 'smooth' });
+                }
             }
         });
-    });
+    },
 
-    // Auto-focus first input in forms with better UX
-    const firstInput = document.querySelector('input[type="text"], input[type="email"], textarea');
-    if (firstInput && !firstInput.hasAttribute('readonly')) {
-        // Delay focus to avoid issues with page load
-        setTimeout(() => firstInput.focus(), 100);
-    }
+    // Utility functions
+    debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    },
 
-    // Add loading shimmer effect
-    const shimmerElements = document.querySelectorAll('[data-shimmer]');
-    shimmerElements.forEach(element => {
-        element.style.background = 'linear-gradient(90deg, transparent, rgba(50, 184, 198, 0.1), transparent)';
-        element.style.backgroundSize = '200% 100%';
-        element.style.animation = 'shimmer 2s infinite';
-    });
-}
+    // Initialize background animations
+    initBackgroundAnimations() {
+        // Add floating animation to feature icons
+        document.querySelectorAll('.feature-icon, .benefit-icon, .security-icon').forEach((icon, index) => {
+            icon.style.animation = `float ${4 + (index % 3)}s ease-in-out infinite`;
+            icon.style.animationDelay = `${(index % 5) * 0.5}s`;
+        });
 
-// Enhanced counter Animation with Solarin styling
-function animateCounter(element, target, duration = 2000) {
-    let start = 0;
-    const increment = target / (duration / 16);
-    
-    const timer = setInterval(() => {
-        start += increment;
-        if (start >= target) {
-            element.textContent = target;
-            element.style.color = '#32B8C6'; // Solarin teal
-            clearInterval(timer);
-        } else {
-            element.textContent = Math.floor(start);
-        }
-    }, 16);
-}
-
-// Enhanced counter observer with stagger effect
-const counterObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry, index) => {
-        if (entry.isIntersecting) {
-            const targetValue = parseInt(entry.target.getAttribute('data-target'));
-            if (targetValue && !isNaN(targetValue)) {
-                setTimeout(() => {
-                    animateCounter(entry.target, targetValue);
-                }, index * 200); // Stagger animation
-                counterObserver.unobserve(entry.target);
-            }
-        }
-    });
-}, { threshold: 0.5 });
-
-// Observe counter elements
-document.querySelectorAll('[data-target]').forEach(counter => {
-    counterObserver.observe(counter);
-});
-
-// Global utility functions with Solarin theme
-if (typeof window !== 'undefined') {
-    window.SecretGuardian = {
-        // Enhanced notification with Solarin colors
-        showNotification: function(message, type = 'info') {
-            // Remove existing notifications
-            const existingNotifications = document.querySelectorAll('.notification');
-            existingNotifications.forEach(notif => notif.remove());
-
-            const notification = document.createElement('div');
-            notification.className = `notification notification-${type}`;
-            
-            const icon = type === 'success' ? 'check-circle' : 
-                        type === 'error' ? 'exclamation-circle' : 
-                        type === 'warning' ? 'exclamation-triangle' : 'info-circle';
-            
-            notification.innerHTML = `
-                <i class="fas fa-${icon}"></i>
-                <span>${message}</span>
-                <button class="notification-close">&times;</button>
+        // Add CSS for floating animation if not exists
+        if (!document.querySelector('#floating-styles')) {
+            const style = document.createElement('style');
+            style.id = 'floating-styles';
+            style.textContent = `
+                @keyframes float {
+                    0%, 100% { transform: translateY(0px); }
+                    50% { transform: translateY(-8px); }
+                }
             `;
-            
-            document.body.appendChild(notification);
-            
-            // Enhanced animation
-            notification.style.transform = 'translateX(100%)';
-            notification.style.opacity = '0';
-            setTimeout(() => {
-                notification.style.transform = 'translateX(0)';
-                notification.style.opacity = '1';
-            }, 10);
-            
-            // Auto remove after 5 seconds
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.style.transform = 'translateX(100%)';
-                    notification.style.opacity = '0';
-                    setTimeout(() => notification.remove(), 300);
-                }
-            }, 5000);
-            
-            // Close button
-            notification.querySelector('.notification-close').addEventListener('click', () => {
-                notification.style.transform = 'translateX(100%)';
-                notification.style.opacity = '0';
-                setTimeout(() => notification.remove(), 300);
-            });
-        },
-
-        // Enhanced date formatting
-        formatDate: function(date) {
-            return new Date(date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        },
-
-        // Enhanced clipboard with feedback
-        copyToClipboard: function(text) {
-            if (navigator.clipboard) {
-                navigator.clipboard.writeText(text).then(() => {
-                    this.showNotification('✨ Copied to clipboard!', 'success');
-                }).catch(() => {
-                    this.showNotification('❌ Failed to copy to clipboard', 'error');
-                });
-            } else {
-                // Fallback for older browsers
-                const textArea = document.createElement('textarea');
-                textArea.value = text;
-                textArea.style.position = 'fixed';
-                textArea.style.opacity = '0';
-                document.body.appendChild(textArea);
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                    this.showNotification('✨ Copied to clipboard!', 'success');
-                } catch (err) {
-                    this.showNotification('❌ Failed to copy to clipboard', 'error');
-                }
-                document.body.removeChild(textArea);
-            }
-        },
-
-        // Always return Solarin theme
-        getTheme: function() {
-            return 'solarin';
-        },
-
-        // Enhanced tooltips with Solarin styling
-        initTooltips: function() {
-            const tooltipElements = document.querySelectorAll('[data-tooltip]');
-            tooltipElements.forEach(element => {
-                element.addEventListener('mouseenter', function() {
-                    const tooltip = document.createElement('div');
-                    tooltip.className = 'tooltip solarin-tooltip';
-                    tooltip.textContent = this.getAttribute('data-tooltip');
-                    document.body.appendChild(tooltip);
-                    
-                    const rect = this.getBoundingClientRect();
-                    tooltip.style.left = rect.left + (rect.width / 2) - (tooltip.offsetWidth / 2) + 'px';
-                    tooltip.style.top = rect.top - tooltip.offsetHeight - 12 + 'px';
-                    
-                    // Animate in
-                    tooltip.style.opacity = '0';
-                    tooltip.style.transform = 'translateY(10px)';
-                    setTimeout(() => {
-                        tooltip.style.opacity = '1';
-                        tooltip.style.transform = 'translateY(0)';
-                    }, 10);
-                });
-                
-                element.addEventListener('mouseleave', function() {
-                    const tooltips = document.querySelectorAll('.tooltip');
-                    tooltips.forEach(tooltip => {
-                        tooltip.style.opacity = '0';
-                        tooltip.style.transform = 'translateY(10px)';
-                        setTimeout(() => tooltip.remove(), 150);
-                    });
-                });
-            });
+            document.head.appendChild(style);
         }
-    };
-}
+    },
 
-// Enhanced CSS for notifications and tooltips with Solarin theme
-const utilityCSS = `
-@keyframes shimmer {
-    0% { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
-}
+    // Add loading states for async operations
+    addLoadingState(element, text = 'Loading...') {
+        element.classList.add('loading');
+        element.disabled = true;
+        const originalContent = element.innerHTML;
+        element.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${text}`;
+        
+        return () => {
+            element.classList.remove('loading');
+            element.disabled = false;
+            element.innerHTML = originalContent;
+        };
+    },
 
-@keyframes ripple {
-    to {
-        transform: scale(4);
-        opacity: 0;
+    // Smooth reveal animations on page sections
+    revealSections() {
+        const sections = document.querySelectorAll('section');
+        sections.forEach((section, index) => {
+            section.style.opacity = '0';
+            section.style.transform = 'translateY(30px)';
+            
+            setTimeout(() => {
+                section.style.transition = 'all 0.8s ease-out';
+                section.style.opacity = '1';
+                section.style.transform = 'translateY(0)';
+            }, index * 200);
+        });
     }
-}
+};
 
-.ripple {
-    position: absolute;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.3);
-    transform: scale(0);
-    animation: ripple 0.6s linear;
-    pointer-events: none;
-}
-
-.notification {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 16px 20px;
-    background: rgba(17, 100, 102, 0.95);
-    border: 1px solid rgba(50, 184, 198, 0.3);
-    border-radius: 12px;
-    backdrop-filter: blur(15px);
-    color: #F5F5F5;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-    max-width: 400px;
-    font-size: 14px;
-    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.notification-success {
-    border-left: 4px solid #32B8C6;
-    background: rgba(50, 184, 198, 0.15);
-}
-
-.notification-error {
-    border-left: 4px solid #FF6B6B;
-    background: rgba(255, 107, 107, 0.15);
-}
-
-.notification-warning {
-    border-left: 4px solid #FFCB9A;
-    background: rgba(255, 203, 154, 0.15);
-}
-
-.notification-info {
-    border-left: 4px solid #32B8C6;
-    background: rgba(50, 184, 198, 0.15);
-}
-
-.notification-close {
-    background: none;
-    border: none;
-    color: #8A9BA8;
-    font-size: 18px;
-    cursor: pointer;
-    padding: 0;
-    margin-left: auto;
-    transition: color 0.2s ease;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.notification-close:hover {
-    color: #F5F5F5;
-    background: rgba(255, 255, 255, 0.1);
-}
-
-.tooltip, .solarin-tooltip {
-    position: absolute;
-    z-index: 10001;
-    padding: 10px 14px;
-    background: rgba(17, 100, 102, 0.95);
-    color: #F5F5F5;
-    font-size: 12px;
-    border-radius: 8px;
-    pointer-events: none;
-    white-space: nowrap;
-    border: 1px solid rgba(50, 184, 198, 0.3);
-    backdrop-filter: blur(10px);
-    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.3);
-    transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-.tooltip::after, .solarin-tooltip::after {
-    content: '';
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 6px solid transparent;
-    border-top-color: rgba(17, 100, 102, 0.95);
-}
-
-/* Enhanced loading states */
-.loading {
-    opacity: 0.7;
-    pointer-events: none;
-    position: relative;
-}
-
-.loading::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(90deg, transparent, rgba(50, 184, 198, 0.1), transparent);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-}
-
-/* Smooth page transitions */
-body {
-    transition: opacity 0.3s ease;
-}
-
-body.page-transition {
-    opacity: 0;
-}
-
-/* Enhanced scrollbar for webkit browsers */
-::-webkit-scrollbar {
-    width: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: rgba(44, 53, 49, 0.3);
-}
-
-::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, #32B8C6, #116466);
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, #D9B08C, #FFCB9A);
-}
-`;
-
-// Inject enhanced utility CSS
-const style = document.createElement('style');
-style.textContent = utilityCSS;
-document.head.appendChild(style);
-
-// Enhanced loading states with Solarin theme
-window.addEventListener('beforeunload', () => {
-    document.body.classList.add('page-transition');
-});
-
-window.addEventListener('load', () => {
-    document.body.classList.remove('page-transition');
-    document.body.classList.add('loaded');
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    window.SecretGuardian.init();
+    window.SecretGuardian.initBackgroundAnimations();
     
-    // Add entrance animation to page elements
-    const elements = document.querySelectorAll('.homepage-hero-content, .homepage-section-header');
-    elements.forEach((element, index) => {
-        element.style.opacity = '0';
-        element.style.transform = 'translateY(30px)';
-        setTimeout(() => {
-            element.style.transition = 'all 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
-            element.style.opacity = '1';
-            element.style.transform = 'translateY(0)';
-        }, index * 200);
-    });
+    // Show welcome notification after a short delay
+    setTimeout(() => {
+        window.SecretGuardian.showNotification(
+            'Welcome to SecretGuardian! Secure your repositories today.',
+            'success',
+            4000
+        );
+    }, 1000);
 });
+
+// Handle page visibility changes - Pause animations when not visible
+document.addEventListener('visibilitychange', () => {
+    const elements = document.querySelectorAll('[style*="animation"]');
+    if (document.hidden) {
+        elements.forEach(el => el.style.animationPlayState = 'paused');
+    } else {
+        elements.forEach(el => el.style.animationPlayState = 'running');
+    }
+});
+
+// Performance optimizations - Preload critical images
+if ('requestIdleCallback' in window) {
+    window.requestIdleCallback(() => {
+        const criticalImages = [
+            'favicon.jpg',
+            'screenshot-dashboard.jpg',
+            'screenshot-reports.jpg',
+            'screenshot-repos.jpg'
+        ];
+
+        criticalImages.forEach(src => {
+            const img = new Image();
+            img.src = src;
+        });
+    });
+}
+
+// Smooth entrance animations on page load
+window.addEventListener('load', () => {
+    // Add entrance animation to the hero content
+    const heroContent = document.querySelector('.hero-content');
+    if (heroContent) {
+        heroContent.style.transform = 'translateY(30px)';
+        heroContent.style.opacity = '0';
+        
+        setTimeout(() => {
+            heroContent.style.transition = 'all 1s ease-out';
+            heroContent.style.transform = 'translateY(0)';
+            heroContent.style.opacity = '1';
+        }, 200);
+    }
+
+    // Reveal sections with staggered animation
+    setTimeout(() => {
+        window.SecretGuardian.revealSections();
+    }, 500);
+});
+
+// Export for use in other scripts if needed
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = window.SecretGuardian;
+}
