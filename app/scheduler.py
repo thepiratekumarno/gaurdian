@@ -23,7 +23,7 @@ def should_skip_directory(dir_path: str) -> bool:
         'logs', 'log', 'tmp', 'temp', '.tmp', '.temp', 'uploads', 'downloads',
         '.vscode', '.idea', '.vs', 'bin', 'obj', 'packages', 'bower_components',
         '.next', '.nuxt', 'out', 'public/assets', 'static/assets', 'assets/vendor',
-        'venv', 'env', '.env', 'virtualenv', '.virtualenv', 'conda-meta',
+        'venv','virtualenv', '.virtualenv', 'conda-meta',
         'site-packages', 'Lib/site-packages', '.tox', '.nox', 'htmlcov'
     ]
     
