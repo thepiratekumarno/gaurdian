@@ -4,195 +4,1252 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Secret Guardian - Protect Your Code</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    
+    <title>SecretGuardian - Take Control Of Your GitHub Security</title>
+    <meta name="description"
+        content="Free secret detection for GitHub repositories. Discover all your secrets, prioritize and remediate leaks at scale. Protect your repositories and reduce breach risks.">
+    <link rel="icon" type="image/x-icon" href="/static/favicon1.png">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <style>
+        /* SecretGuardian - Complete Inline Styles */
+        :root {
+            /* Exact Color Specifications */
+            --color-primary: #0A0F1C;
+            --color-primary-light: #0D1224;
+            --color-curve-mid: #2A3A55;
+            --color-curve-soft: #3F5B84;
+            --color-curve-light: #A0A7B8;
+            --color-text: #FFFFFF;
+            --color-text-muted: #A1A6B2;
+
+            /* Background Colors */
+            --color-background: #0A0F1C;
+            --color-background-light: #0D1224;
+            --color-surface: rgba(13, 18, 36, 0.8);
+            --color-border: rgba(42, 58, 85, 0.3);
+
+            /* Status Colors */
+            --color-success: #10B981;
+            --color-warning: #F59E0B;
+            --color-error: #EF4444;
+            --color-info: #3B82F6;
+
+            /* Shadows */
+            --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.5);
+            --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.6);
+            --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.7);
+            --shadow-xl: 0 16px 32px rgba(0, 0, 0, 0.8);
+
+            /* Spacing */
+            --spacing-xs: 0.5rem;
+            --spacing-sm: 1rem;
+            --spacing-md: 1.5rem;
+            --spacing-lg: 2rem;
+            --spacing-xl: 3rem;
+            --spacing-2xl: 4rem;
+            --spacing-3xl: 6rem;
+
+            /* Typography */
+            --font-size-xs: 0.75rem;
+            --font-size-sm: 0.875rem;
+            --font-size-base: 1rem;
+            --font-size-lg: 1.125rem;
+            --font-size-xl: 1.25rem;
+            --font-size-2xl: 1.5rem;
+            --font-size-3xl: 1.875rem;
+            --font-size-4xl: 2.5rem;
+            --font-size-5xl: 3.5rem;
+
+            /* Transitions */
+            --transition-fast: 0.15s ease;
+            --transition-base: 0.3s ease;
+            --transition-slow: 0.5s ease;
+        }
+
+        /* Reset and Base Styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'SF Pro Display', sans-serif;
+            line-height: 1.6;
+            color: var(--color-text);
+            background-color: var(--color-primary);
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 var(--spacing-md);
+        }
+
+        /* Navigation */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: transparent !important;  /* thoda translucent */
+            backdrop-filter: blur(15px) !important;        /* blur effect */
+            -webkit-backdrop-filter: blur(15px) !important; /* Safari support */
+            border-bottom: 1px solid rgba(255, 255, 255, 0.15) 
+            transition: all var(--transition-base);
+        }
+
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--spacing-sm) var(--spacing-md);
+            background: transparent !important;
+            backdrop-filter: blur(15px) !important;
+            -webkit-backdrop-filter: blur(15px) !important;
+        }
+
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-sm);
+            text-decoration: none;
+            color: var(--color-text);
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            object-fit: cover;
+            opacity: 0.95;
+        }
+
+        .brand-text {
+            font-size: var(--font-size-xl);
+            font-weight: 700;
+            color: var(--color-text);
+        }
+
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-lg);
+        }
+
+        .nav-link {
+            color: var(--color-text-muted);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color var(--transition-fast);
+            position: relative;
+        }
+
+        .nav-link:hover {
+            color: var(--color-text);
+        }
+
+        .nav-link::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--color-curve-soft);
+            transition: width var(--transition-base);
+        }
+
+        .nav-link:hover::after {
+            width: 100%;
+        }
+
+        .mobile-menu-toggle {
+            display: none;
+            font-size: var(--font-size-xl);
+            cursor: pointer;
+            color: var(--color-text);
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            padding: var(--spacing-sm) var(--spacing-lg);
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all var(--transition-base);
+            position: relative;
+            overflow: hidden;
+            font-size: var(--font-size-base);
+        }
+
+        .btn-primary {
+            background: var(--color-text);
+            color: var(--color-primary);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+            background: #f8f9fa;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--color-text);
+            border: 2px solid var(--color-text);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .btn-lg {
+            padding: var(--spacing-md) var(--spacing-xl);
+            font-size: var(--font-size-lg);
+        }
+
+        .btn-xl {
+            padding: var(--spacing-lg) var(--spacing-2xl);
+            font-size: var(--font-size-xl);
+        }
+
+        /* Hero Section */
+        .hero {
+            position: relative;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: var(--color-primary);
+            background-image: url('/static/back.png');
+            /* Your background image */
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            
+            overflow: hidden;
+            margin-top: 50px;
+        }
+
+        /* Dark overlay for better text readability */
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(10, 15, 28, 0.7);
+            z-index: 1;
+        }
+
+        .hero-container {
+            position: relative;
+            z-index: 2;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: var(--spacing-2xl) var(--spacing-md);
+        }
+
+        .hero-content {
+            text-align: center;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .hero-logo {
+            margin-bottom: var(--spacing-lg);
+            opacity: 0;
+            transform: translateY(30px);
+            animation: fadeInUp 0.8s ease-out 0.2s forwards;
+        }
+
+        .hero-logo-img {
+            width: 80px;
+            height: 80px;
+            border-radius: 16px;
+            object-fit: cover;
+            box-shadow: var(--shadow-lg);
+            opacity: 0.95;
+        }
+
+        .hero-title {
+            font-size: clamp(var(--font-size-4xl), 6vw, var(--font-size-5xl));
+            font-weight: 800;
+            margin-bottom: var(--spacing-lg);
+            line-height: 1.1;
+            color: var(--color-text);
+            opacity: 0;
+            transform: translateY(30px);
+            animation: fadeInUp 0.8s ease-out 0.4s forwards;
+        }
+
+        .title-highlight {
+            display: block;
+            background: linear-gradient(135deg, var(--color-curve-soft), var(--color-curve-light));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-top: var(--spacing-xs);
+        }
+
+        .hero-subtitle {
+            font-size: var(--font-size-xl);
+            color: var(--color-text-muted);
+            margin-bottom: var(--spacing-2xl);
+            line-height: 1.6;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeInUp 0.8s ease-out 0.6s forwards;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: var(--spacing-md);
+            justify-content: center;
+            margin-bottom: var(--spacing-2xl);
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeInUp 0.8s ease-out 0.8s forwards;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            padding: var(--spacing-sm) var(--spacing-md);
+            background: var(--color-primary-light);
+            border: 1px solid rgba(63, 91, 132, 0.4);
+            border-radius: 24px;
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            color: var(--color-text);
+            opacity: 0;
+            transform: translateY(20px);
+            animation: fadeInUp 0.8s ease-out 1s forwards;
+        }
+
+        .hero-badge i {
+            color: var(--color-curve-light);
+        }
+
+        /* Sections */
+        .section {
+            padding: var(--spacing-3xl) 0;
+            background-color: var(--color-background-light);
+        }
+
+        .section:nth-child(even) {
+            background-color: var(--color-primary);
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: var(--spacing-3xl);
+        }
+
+        .section-header h2 {
+            font-size: var(--font-size-3xl);
+            font-weight: 700;
+            margin-bottom: var(--spacing-md);
+            color: var(--color-text);
+        }
+
+        .section-header p {
+            font-size: var(--font-size-lg);
+            color: var(--color-text-muted);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        /* Showcase Section */
+        .showcase-item {
+            display: grid;
+            gap: var(--spacing-2xl);
+            margin-bottom: var(--spacing-3xl);
+            opacity: 0;
+            transform: translateY(30px);
+            transition: all var(--transition-base);
+        }
+
+        .showcase-left {
+            grid-template-columns: 1fr 1fr;
+            align-items: center;
+        }
+
+        .showcase-right {
+            grid-template-columns: 1fr 1fr;
+            align-items: center;
+        }
+
+        .showcase-right .showcase-content {
+            order: 1;
+        }
+
+        .showcase-right .showcase-image {
+            order: 2;
+        }
+
+        .showcase-image {
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            background: var(--color-surface);
+            aspect-ratio: 16/10;
+            box-shadow: var(--shadow-xl);
+        }
+
+        .showcase-img {
+            width: 100%;
+            height: 100%;
+            object-fit:scale-down 30px;
+            transition: transform var(--transition-slow);
+        }
+
+        .showcase-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity var(--transition-base);
+            cursor: pointer;
+        }
+
+        .showcase-overlay i {
+            font-size: var(--font-size-3xl);
+            color: var(--color-text);
+        }
+
+
+        .showcase-content {
+            padding: var(--spacing-lg);
+        }
+
+        .showcase-content h3 {
+            font-size: var(--font-size-2xl);
+            font-weight: 700;
+            margin-bottom: var(--spacing-md);
+            color: var(--color-text);
+        }
+
+        .showcase-content p {
+            color: var(--color-text-muted);
+            margin-bottom: var(--spacing-lg);
+            line-height: 1.7;
+            font-size: var(--font-size-lg);
+        }
+
+        .showcase-features {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .feature-tag {
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-xs);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            background: rgba(63, 91, 132, 0.2);
+            border: 1px solid rgba(63, 91, 132, 0.4);
+            border-radius: 6px;
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            color: var(--color-curve-light);
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: var(--spacing-xl);
+        }
+
+        .feature-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 20px;
+            padding: var(--spacing-xl);
+            transition: all var(--transition-base);
+            position: relative;
+            overflow: hidden;
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--color-curve-soft), var(--color-curve-light));
+            transform: translateX(-100%);
+            transition: transform var(--transition-slow);
+        }
+
+        .feature-card:hover::before {
+            transform: translateX(0);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-10px);
+            box-shadow: var(--shadow-xl);
+            border-color: var(--color-curve-soft);
+        }
+
+        .feature-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, var(--color-curve-soft), var(--color-curve-light));
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: var(--spacing-md);
+            font-size: var(--font-size-2xl);
+            color: var(--color-text);
+        }
+
+        .feature-content h3 {
+            font-size: var(--font-size-xl);
+            font-weight: 700;
+            margin-bottom: var(--spacing-sm);
+            color: var(--color-text);
+        }
+
+        .feature-content p {
+            color: var(--color-text-muted);
+            line-height: 1.7;
+        }
+
+        /* Security Grid */
+        .security-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: var(--spacing-lg);
+        }
+
+        .security-item {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 16px;
+            padding: var(--spacing-lg);
+            text-align: center;
+            transition: all var(--transition-base);
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        .security-item:hover {
+            transform: translateY(-5px);
+            border-color: var(--color-curve-soft);
+        }
+
+        .security-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, var(--color-curve-soft), var(--color-curve-light));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto var(--spacing-md);
+            font-size: var(--font-size-xl);
+            color: var(--color-text);
+        }
+
+        .security-item h3 {
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+            margin-bottom: var(--spacing-sm);
+            color: var(--color-text);
+        }
+
+        .security-item p {
+            color: var(--color-text-muted);
+            font-size: var(--font-size-sm);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: var(--spacing-lg);
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .stat-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 16px;
+            padding: var(--spacing-xl);
+            text-align: center;
+            transition: transform var(--transition-base);
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-number {
+            font-size: var(--font-size-4xl);
+            font-weight: 800;
+            color: var(--color-curve-light);
+            margin-bottom: var(--spacing-xs);
+        }
+
+        .stat-label {
+            font-size: var(--font-size-sm);
+            color: var(--color-text-muted);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        /* Footer */
+        .footer {
+            background-color: var(--color-background-light);
+            border-top: 1px solid var(--color-border);
+            padding: var(--spacing-2xl) 0 var(--spacing-md);
+        }
+
+        .footer-content {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: var(--spacing-2xl);
+            margin-bottom: var(--spacing-lg);
+        }
+
+        .footer-brand {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+        }
+
+        .footer-logo {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            opacity: 0.95;
+        }
+
+        .footer-brand-text {
+            font-size: var(--font-size-xl);
+            font-weight: 700;
+            color: var(--color-text);
+        }
+
+        .footer-brand p {
+            color: var(--color-text-muted);
+            max-width: 300px;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: var(--spacing-2xl);
+        }
+
+        .footer-section h4 {
+            color: var(--color-text);
+            margin-bottom: var(--spacing-sm);
+            font-weight: 600;
+        }
+
+        .footer-section a {
+            display: block;
+            color: var(--color-text-muted);
+            text-decoration: none;
+            margin-bottom: var(--spacing-xs);
+            transition: color var(--transition-fast);
+        }
+
+        .footer-section a:hover {
+            color: var(--color-curve-light);
+        }
+
+        .footer-bottom {
+            border-top: 1px solid var(--color-border);
+            padding-top: var(--spacing-md);
+            text-align: center;
+            color: var(--color-text-muted);
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-in {
+            animation: fadeInUp 0.8s ease-out forwards;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 1024px) {
+
+            .showcase-left,
+            .showcase-right {
+                grid-template-columns: 1fr;
+                gap: var(--spacing-xl);
+            }
+
+            .showcase-right .showcase-content {
+                order: 2;
+            }
+
+            .showcase-right .showcase-image {
+                order: 1;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .nav-menu {
+                display: none;
+            }
+
+            .mobile-menu-toggle {
+                display: block;
+            }
+
+            .hero-actions {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .features-grid {
+                grid-template-columns: 1fr;
+                gap: var(--spacing-lg);
+            }
+
+            .security-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .footer-content {
+                grid-template-columns: 1fr;
+                text-align: center;
+            }
+
+            .footer-links {
+                justify-content: center;
+            }
+
+            /* Remove background-attachment: fixed on mobile for better performance */
+            .hero {
+                background-attachment: scroll;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .hero-container {
+                padding: var(--spacing-lg) var(--spacing-sm);
+            }
+
+            .hero-title {
+                font-size: var(--font-size-3xl);
+            }
+
+            .btn-lg {
+                padding: var(--spacing-sm) var(--spacing-md);
+                font-size: var(--font-size-base);
+            }
+
+            .btn-xl {
+                padding: var(--spacing-md) var(--spacing-lg);
+                font-size: var(--font-size-lg);
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .showcase-features {
+                flex-direction: column;
+            }
+        }
+
+        /* Loading and Interaction States */
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .feature-card:hover .feature-icon {
+            transform: scale(1.1);
+        }
+
+        .security-item:hover .security-icon {
+            transform: scale(1.1);
+        }
+    </style>
 </head>
 
 <body>
     <!-- Navigation -->
-    <nav class="homepage-navbar">
-        <div class="homepage-nav-container">
-            <div class="homepage-nav-brand">
-                <i class="fas fa-shield-alt"></i>
-                <span>Secret Guardian</span>
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <img src="/static/favicon2.png" alt="SecretGuardian" class="logo">
+                <span class="brand-text">SecretGuardian</span>
             </div>
-            <div class="homepage-nav-menu">
-                <a href="/login" class="homepage-nav-login">
-                    <i class="fas fa-sign-in-alt"></i>
-                    Login
-                </a>
+            <div class="nav-menu">
+                <a href="#features" class="nav-link">Features</a>
+                <a href="#showcase" class="nav-link">Showcase</a>
+                <a href="#security" class="nav-link">Security Types</a>
+                <a href="/login" class="btn btn-primary">Login / Sign Up</a>
+            </div>
+            <div class="mobile-menu-toggle">
+                <i class="fas fa-bars"></i>
             </div>
         </div>
     </nav>
 
-    <!-- Hero Section -->
-    <section class="homepage-hero">
-        <div class="homepage-hero-bg">
-            <canvas id="hero-canvas"></canvas>
-        </div>
-        <div class="homepage-hero-content">
-            <div class="homepage-hero-text">
-                <h1 class="homepage-hero-title">
-                    Protect Your Code from
-                    <span class="homepage-gradient-text">Secret Leaks</span>
+    <!-- Hero Section with Background Image -->
+    <section class="hero">
+        <div class="hero-container">
+            <div class="hero-content">
+                <div class="hero-logo">
+                    <img src="/static/favicon2.png" alt="SecretGuardian" class="hero-logo-img">
+                </div>
+
+                <h1 class="hero-title">
+                    Take Control Of Your
+                    <span class="title-highlight">GitHub Security</span>
                 </h1>
-                <p class="homepage-hero-subtitle">
-                    Free AI-powered secret detection for GitHub repositories.
-                    Scan, monitor, and secure your codebase automatically.
+
+                <p class="hero-subtitle">
+                    Discover all your secrets. Prioritize and remediate leaks at scale.
+                    <br>Protect your repositories and reduce breach risks.
                 </p>
-                <div class="homepage-hero-buttons">
-                    <a href="/login" class="homepage-btn homepage-btn-primary homepage-btn-lg">
+
+                <div class="hero-actions">
+                    <a href="/login" class="btn btn-primary btn-lg">
                         <i class="fas fa-rocket"></i>
-                        Start Free
+                        Start for Free
+                    </a>
+                    <a href="#showcase" class="btn btn-secondary btn-lg">
+                        <i class="fas fa-play"></i>
+                        Book a Demo
                     </a>
                 </div>
-                <div class="homepage-hero-stats">
-                    <div class="homepage-stat">
-                        <span class="homepage-stat-number">Free</span>
-                        <span class="homepage-stat-label">Always Free</span>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Showcase Section -->
+    <section id="showcase" class="section">
+        <div class="container">
+            <div class="section-header">
+                <h2>See SecretGuardian in Action</h2>
+                <p> A real-time Dasboard monitoring and detailed reporting</p>
+            </div>
+
+            <!-- First Showcase Item - Image Left, Content Right -->
+            <div class="showcase-item showcase-left">
+                <div class="showcase-image">
+                    <img src="/static/dash.png" alt="Security Dashboard" class="showcase-img">
+                    <div class="showcase-overlay">
+                        <i class="fas fa-search-plus"></i>
                     </div>
-                    <div class="homepage-stat">
-                        <span class="homepage-stat-number">AI</span>
-                        <span class="homepage-stat-label">Powered Detection</span>
-                    </div>
-                    <div class="homepage-stat">
-                        <span class="homepage-stat-number">GitHub</span>
-                        <span class="homepage-stat-label">Integration</span>
+                </div>
+                <div class="showcase-content">
+                    <h3>Security Dashboard</h3>
+                    <p>Monitor your repositories with security metrics. Track High Risk, Medium Risk
+                        , and Low Risk monitored repositories with real-time updates and
+                        intuitive visualizations.</p>
+                    <div class="showcase-features">
+                        <span class="feature-tag"><i class="fas fa-chart-line"></i> Real-time Monitoring</span>
+                        <span class="feature-tag"><i class="fas fa-analytics"></i> Risk Analytics</span>
+                        <span class="feature-tag"><i class="fas fa-bolt"></i> Quick Actions</span>
                     </div>
                 </div>
             </div>
-        </div>
-        <div class="homepage-scroll-indicator">
-            <div class="homepage-scroll-arrow"></div>
+
+            <!-- Second Showcase Item - Image Right, Content Left -->
+            <div class="showcase-item showcase-right">
+                <div class="showcase-content">
+                    <h3>Detailed Security Reports</h3>
+                    <p>View and analyze all security scan reports with detailed findings, timestamps, and risk levels.
+                        Advanced filtering and search capabilities help you prioritize critical vulnerabilities and
+                        track remediation progress.</p>
+                    <div class="showcase-features">
+                        <span class="feature-tag"><i class="fas fa-microscope"></i> Detailed Analysis</span>
+                        <span class="feature-tag"><i class="fas fa-history"></i> Historical Data</span>
+                        <span class="feature-tag"><i class="fas fa-download"></i> Export Reports</span>
+                    </div>
+                </div>
+                <div class="showcase-image">
+                    <img src="/static/secur.png" alt="Security Reports" class="showcase-img">
+                    <div class="showcase-overlay">
+                        <i class="fas fa-search-plus"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Third Showcase Item - Image Left, Content Right -->
+            <div class="showcase-item showcase-left">
+                <div class="showcase-image">
+                    <img src="/static/repo.png" alt="Repository Management" class="showcase-img">
+                    <div class="showcase-overlay">
+                        <i class="fas fa-search-plus"></i>
+                    </div>
+                </div>
+                <div class="showcase-content">
+                    <h3>Repository Management</h3>
+                    <p>Seamless GitHub integration with automated webhook setup for continuous security monitoring.
+                        Manage all your repositories from a single dashboard with granular control over scanning
+                        preferences and notification settings.</p>
+                    <div class="showcase-features">
+                        <span class="feature-tag"><i class="fab fa-github"></i> GitHub Webhooks</span>
+                        <span class="feature-tag"><i class="fas fa-robot"></i> Auto Scanning</span>
+                        <span class="feature-tag"><i class="fas fa-envelope"></i> Email Alerts</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
 
     <!-- Features Section -->
-    <section id="features" class="homepage-features">
-        <div class="homepage-container">
-            <div class="homepage-section-header">
-                <h2>Security Features</h2>
-                <p>Comprehensive protection for your development workflow</p>
+    <section id="features" class="section">
+        <div class="container">
+            <div class="section-header">
+                <h2>Advanced security scanning with intelligent detection and automated monitoring</h2>
+                <p>Our detection system uses multiple layers of security analysis to ensure no secret goes undetected.
+                    From pattern recognition to entropy analysis, we provide comprehensive coverage for all your
+                    repositories.</p>
             </div>
-            <div class="homepage-features-grid">
-                <div class="homepage-feature-card">
-                    <div class="homepage-feature-icon">
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
                         <i class="fas fa-search"></i>
                     </div>
-                    <h3>AI-Powered Detection</h3>
-                    <p>Advanced algorithms detect secrets with high accuracy across 100+ secret types.</p>
-                </div>
-                <div class="homepage-feature-card">
-                    <div class="homepage-feature-icon">
-                        <i class="fas fa-clock"></i>
+                    <div class="feature-content">
+                        <h3>Smart Detection</h3>
+                        <p>Code samples detect secrets with 99% accuracy across 100+ secret types including API keys,
+                            tokens, passwords, and certificates.</p>
                     </div>
-                    <h3>Real-time Monitoring</h3>
-                    <p>Instant alerts for new commits and repository changes with automatic scanning.</p>
                 </div>
-                <div class="homepage-feature-card">
-                    <div class="homepage-feature-icon">
-                        <i class="fas fa-shield-alt"></i>
-                    </div>
-                    <h3>Free Security</h3>
-                    <p>Complete security scanning at no cost - protect your repositories without limits.</p>
-                </div>
-                <div class="homepage-feature-card">
-                    <div class="homepage-feature-icon">
-                        <i class="fas fa-code-branch"></i>
-                    </div>
-                    <h3>GitHub Integration</h3>
-                    <p>Seamless integration with GitHub repositories and webhooks for automated workflows.</p>
-                </div>
-                <div class="homepage-feature-card">
-                    <div class="homepage-feature-icon">
+
+                <div class="feature-card">
+                    <div class="feature-icon">
                         <i class="fas fa-bell"></i>
                     </div>
-                    <h3>Email Notifications</h3>
-                    <p>Get notified instantly when security issues are detected in your code.</p>
+                    <div class="feature-content">
+                        <h3>Instant Alerts</h3>
+                        <p>Instant alerts for new commits and repository changes with automatic scanning and immediate
+                            notifications via email or webhook integrations.</p>
+                    </div>
                 </div>
-                <div class="homepage-feature-card">
-                    <div class="homepage-feature-icon">
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-gift"></i>
+                    </div>
+                    <div class="feature-content">
+                        <h3>Completely Free</h3>
+                        <p>Complete security scanning at no cost - protect unlimited repositories without any
+                            subscription fees, usage limits, or hidden charges.</p>
+                    </div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fab fa-github"></i>
+                    </div>
+                    <div class="feature-content">
+                        <h3>GitHub Integration</h3>
+                        <p>Seamless integration with GitHub repositories, pull requests, and webhooks for automated
+                            workflows and continuous security monitoring.</p>
+                    </div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
                         <i class="fas fa-chart-line"></i>
                     </div>
-                    <h3>Detailed Reports</h3>
-                    <p>Comprehensive reporting with detailed findings and security recommendations.</p>
+                    <div class="feature-content">
+                        <h3>Comprehensive Dashboards</h3>
+                        <p>Comprehensive dashboards with security metrics, trend analysis, and detailed reporting for
+                            compliance and security auditing.</p>
+                    </div>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <div class="feature-content">
+                        <h3>Enterprise Security</h3>
+                        <p> Enterprise-grade security measures to protect your sensitive code
+                            and data.</p>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- How It Works Section -->
-    <section id="how-it-works" class="homepage-how-it-works">
-        <div class="homepage-container">
-            <div class="homepage-section-header">
-                <h2>How It Works</h2>
-                <p>Get started in minutes with our simple 3-step process</p>
+    <!-- Security Types Section -->
+    <section id="security" class="section">
+        <div class="container">
+            <div class="section-header">
+                <h2>Comprehensive coverage of secret types across all major platforms and services</h2>
             </div>
-            <div class="homepage-steps">
-                <div class="homepage-step">
-                    <div class="homepage-step-number">1</div>
-                    <div class="homepage-step-content">
-                        <h3>Connect GitHub</h3>
-                        <p>Link your GitHub account and select repositories to monitor</p>
+
+            <div class="security-grid">
+                <div class="security-item">
+                    <div class="security-icon">
+                        <i class="fab fa-aws"></i>
                     </div>
+                    <h3>Cloud Platforms</h3>
+                    <p>AWS, Google Cloud, Azure, GitHub, GitLab, Stripe, and 50+ other
+                        services</p>
                 </div>
-                <div class="homepage-step">
-                    <div class="homepage-step-number">2</div>
-                    <div class="homepage-step-content">
-                        <h3>Automatic Scanning</h3>
-                        <p>Our AI scans your code for secrets and vulnerabilities</p>
+
+                <div class="security-item">
+                    <div class="security-icon">
+                        <i class="fas fa-database"></i>
                     </div>
+                    <h3>Database Credentials</h3>
+                    <p>MySQL, PostgreSQL, MongoDB, Redis, Elasticsearch connection strings and passwords</p>
                 </div>
-                <div class="homepage-step">
-                    <div class="homepage-step-number">3</div>
-                    <div class="homepage-step-content">
-                        <h3>Get Alerts</h3>
-                        <p>Receive instant notifications and detailed security reports</p>
+
+                <div class="security-item">
+                    <div class="security-icon">
+                        <i class="fas fa-key"></i>
                     </div>
+                    <h3>Private Keys</h3>
+                    <p>RSA, DSA, EC private keys, SSH keys, SSL certificates, and cryptographic materials</p>
+                </div>
+
+                <div class="security-item">
+                    <div class="security-icon">
+                        <i class="fas fa-user-shield"></i>
+                    </div>
+                    <h3>Authentication Tokens</h3>
+                    <p>JWT tokens, OAuth tokens, session cookies, and authentication credentials</p>
+                </div>
+
+                <div class="security-item">
+                    <div class="security-icon">
+                        <i class="fas fa-cogs"></i>
+                    </div>
+                    <h3>Configuration Files</h3>
+                    <p>Environment variables, configuration files, and hardcoded passwords in multiple languages</p>
+                </div>
+
+                <div class="security-item">
+                    <div class="security-icon">
+                        <i class="fas fa-building"></i>
+                    </div>
+                    <h3>Organization Secrets</h3>
+                    <p>Organization-specific secrets, internal API keys, and custom authentication mechanisms</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="section">
+        <div class="container">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number" data-count="100">100+</div>
+                    <div class="stat-label">SECRET TYPES</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" data-count="99">99%</div>
+                    <div class="stat-label">ACCURACY</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">Free</div>
+                    <div class="stat-label">FOREVER</div>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- CTA Section -->
-    <section class="homepage-cta">
-        <div class="homepage-container">
-            <div class="homepage-cta-content">
-                <h2>Ready to Secure Your Code?</h2>
-                <p>Start protecting your repositories for free - no credit card required</p>
-                <a href="/login" class="homepage-btn homepage-btn-primary homepage-btn-lg">
-                    <i class="fas fa-shield-alt"></i>
-                    Start Free Now
+    <section class="section">
+        <div class="container">
+            <div style="text-align: center;">
+                <h2
+                    style="font-size: var(--font-size-3xl); font-weight: 700; margin-bottom: var(--spacing-md); color: var(--color-text);">
+                    Join our SecretGuardian to keep their code secure</h2>
+                <p
+                    style="font-size: var(--font-size-lg); color: var(--color-text-muted); margin-bottom: var(--spacing-xl);">
+                    Start scanning in less than 2 minutes - no credit card required.</p>
+                <a href="/login" class="btn btn-primary btn-xl">
+                    <i class="fas fa-rocket"></i>
+                    Start Free Now - No Credit Card Required
                 </a>
             </div>
         </div>
     </section>
 
     <!-- Footer -->
-    <footer class="homepage-footer">
-        <div class="homepage-container">
-            <div class="homepage-footer-content">
-                <div class="homepage-footer-brand">
-                    <div class="homepage-nav-brand">
-                        <i class="fas fa-shield-alt"></i>
-                        <span>Secret Guardian</span>
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <img src="/static/favicon2.png" alt="SecretGuardian" class="footer-logo">
+                    <span class="footer-brand-text">SecretGuardian</span>
+                    <p>Free Secret Detection for Your Repositories</p>
+                </div>
+                <div class="footer-links">
+                    <div class="footer-section">
+                        <h4>Product</h4>
+                        <a href="#features">Features</a>
+                        <a href="#security">Security</a>
+                        <a href="/login">Dashboard</a>
                     </div>
-                    <p>Protecting your code, securing your future.</p>
+                    <div class="footer-section">
+                        <h4>Support</h4>
+                        <a href="/login">Get Started</a>
+                        <a href="/reports">Reports</a>
+                    </div>
                 </div>
             </div>
-            <div class="homepage-footer-bottom">
-                <p>&copy; 2024 Secret Guardian. All rights reserved.</p>
+            <div class="footer-bottom">
+                <p>&copy; 2025 SecretGuardian. All rights reserved.</p>
             </div>
         </div>
     </footer>
 
-    <script src="/static/main.js"></script>
+    <!-- JavaScript -->
+    <script>
+        // SecretGuardian - Simple Landing Page JavaScript
+        document.addEventListener('DOMContentLoaded', function () {
+            // Smooth scrolling for anchor links
+            document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+                anchor.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    const target = document.querySelector(this.getAttribute('href'));
+                    if (target) {
+                        const offsetTop = target.offsetTop - 80;
+                        window.scrollTo({
+                            top: offsetTop,
+                            behavior: 'smooth'
+                        });
+                    }
+                });
+            });
+
+            // Intersection Observer for animations
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('animate-in');
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.1 });
+
+            // Observe elements for animation
+            document.querySelectorAll('.showcase-item, .feature-card, .security-item').forEach(el => {
+                observer.observe(el);
+            });
+
+            // Counter animation
+            const counters = document.querySelectorAll('[data-count]');
+            const counterObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const target = entry.target;
+                        const finalValue = parseInt(target.getAttribute('data-count'));
+                        animateNumber(target, 0, finalValue, 2000);
+                        counterObserver.unobserve(target);
+                    }
+                });
+            }, { threshold: 0.5 });
+
+            counters.forEach(counter => counterObserver.observe(counter));
+
+            function animateNumber(element, start, end, duration) {
+                const range = end - start;
+                const increment = range / (duration / 16);
+                let current = start;
+
+                const timer = setInterval(() => {
+                    current += increment;
+                    if (current >= end) {
+                        element.textContent = end + (element.textContent.includes('%') ? '%' : '+');
+                        clearInterval(timer);
+                    } else {
+                        element.textContent = Math.floor(current) + (element.textContent.includes('%') ? '%' : '+');
+                    }
+                }, 16);
+            }
+
+            // Mobile menu toggle
+            const mobileToggle = document.querySelector('.mobile-menu-toggle');
+            const navMenu = document.querySelector('.nav-menu');
+
+            if (mobileToggle && navMenu) {
+                mobileToggle.addEventListener('click', () => {
+                    navMenu.style.display = navMenu.style.display === 'flex' ? 'none' : 'flex';
+                    const icon = mobileToggle.querySelector('i');
+                    icon.classList.toggle('fa-bars');
+                    icon.classList.toggle('fa-times');
+                });
+            }
+
+            // Navbar scroll effect
+            const navbar = document.querySelector('.navbar');
+            window.addEventListener('scroll', () => {
+                if (window.scrollY > 50) {
+                    navbar.style.background = 'rgba(10, 15, 28, 0.98)';
+                    navbar.style.backdropFilter = 'blur(25px)';
+                } else {
+                    navbar.style.background = 'rgba(10, 15, 28, 0.95)';
+                    navbar.style.backdropFilter = 'blur(20px)';
+                }
+            });
+        });
+    </script>
+
+    <!-- Enhanced Features -->
+    <script src="static/cookie-consent.js"></script>
+    <script src="static/secure-session.js"></script>
+    <script>
+        function showCookieSettings() {
+            if (window.cookieConsent) {
+                window.cookieConsent.showConsentBannerAgain();
+            }
+        }
+    </script>
+
 </body>
 
 </html>
