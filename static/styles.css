@@ -671,8 +671,11 @@ a:hover {
 .auth-left {
     flex: 1;
     height: 100vh;
+    width: 100%;
+    /* Make sure it spans full width */
     background: url("fff.gif") no-repeat center center;
-    background-size: cover;
+    background-size: 100% 100%;
+    /* Stretches image fully */
     position: relative;
     overflow: hidden;
 }
@@ -951,4 +954,5 @@ a:hover {
 @font-face {
     font-family: 'FKGroteskNeue';
     src: url('https://r2cdn.perplexity.ai/fonts/FKGroteskNeue.woff2') format('woff2');
+
 }
