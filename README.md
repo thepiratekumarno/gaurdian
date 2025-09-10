@@ -8,8 +8,7 @@
 
 ## 🚀 Features
 
-- **🤖 AI-Powered Detection** - Advanced machine learning algorithms detect API keys, passwords, tokens, and sensitive data
-- **🔒 Two-Layer Security** - OTP wall protection with email verification for enhanced security
+- **🤖 AI-Powered Detection** -  Detect API keys, passwords, tokens, and sensitive data
 - **⚡ Real-time Monitoring** - Continuous repository scanning with instant security alerts
 - **🌐 OAuth Integration** - Seamless GitHub and Google authentication
 - **📧 Smart Notifications** - Professional email alerts with detailed security reports
@@ -23,7 +22,6 @@
 - **Authentication:** OAuth 2.0 (GitHub/Google)
 - **Email:** SMTP Integration
 - **Frontend:** Jinja2 Templates
-- **Security:** OTP Verification System
 - **Deployment:** Docker Ready
 
 ## 📦 Quick Start
@@ -82,7 +80,6 @@ http://localhost:8000
 
 ## 🎯 Usage
 
-1. **Secure Login** - Navigate to `/login` and complete OTP verification
 2. **Connect GitHub** - Authorize SecretGuardian to access your repositories  
 3. **Add Repositories** - Select repositories for continuous monitoring
 4. **Monitor Dashboard** - View security findings and reports
@@ -90,7 +87,6 @@ http://localhost:8000
 
 ## 🔒 Security Features
 
-- **OTP Wall Protection** - Two-factor authentication for admin access
 - **Session Management** - Secure session handling with automatic expiry
 - **Rate Limiting** - Protection against brute force attacks  
 - **Encrypted Storage** - Secure database storage of sensitive data
@@ -128,9 +124,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- **Email:** support@secretguardian.com
-- **Documentation:** [docs.secretguardian.com](https://docs.secretguardian.com)
-- **Issues:** [GitHub Issues](https://github.com/yourusername/secretguardian/issues)
+- **Email:** secretguardian@zahomail.in
+- **Issues:** [GitHub Issues](https://github.com/thepiratekumarno/gaurdian/issues)
 
 ## 🏆 Awards & Recognition
 
@@ -144,6 +139,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Made with ❤️ for Developer Security**
 
-[Website](https://secretguardian.com) • [Documentation](https://docs.secretguardian.com) • [Demo](https://demo.secretguardian.com)
+[Website](https://secretguardian.onrender.com) • [Demo](https://secretguardian.onrender.com)
 
 </div>
